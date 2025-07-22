@@ -110,6 +110,66 @@ copy_to_ventoy() {
     fi
 }
 
+# Function to cache packages intelligently
+cache_packages() {
+    echo -e "${BLUE}🗄️  Checking package cache...${NC}"
+
+    # Create cache directory if it doesn't exist
+    mkdir -p package_cache
+
+    # Check if we have the package list
+    if [[ ! -f "configs/packages.x86_64" ]]; then
+        echo -e "${RED}❌ Package list not found: configs/packages.x86_64${NC}"
+        return 1
+    fi
+
+    # Read packages from config (excluding comments and empty lines)
+    local packages=($(grep -v '^#' configs/packages.x86_64 | grep -v '^$' | tr '\n' ' '))
+    local total_packages=${#packages[@]}
+    local cached_packages=0
+    local downloaded_packages=0
+
+    echo -e "${BLUE}📋 Found $total_packages packages to cache${NC}"
+
+    # Check which packages are already cached and up-to-date
+    for package in "${packages[@]}"; do
+        # Get latest package info from repos
+        local latest_version=$(pacman -Si "$package" 2>/dev/null | grep '^Version' | awk '{print $3}')
+
+        if [[ -z "$latest_version" ]]; then
+            echo -e "${YELLOW}⚠️  Package $package not found in repos, skipping${NC}"
+            continue
+        fi
+
+        # Check if we have this package cached
+        local cached_file=$(find package_cache -name "${package}-${latest_version}-*.pkg.tar.*" 2>/dev/null | head -1)
+
+        if [[ -n "$cached_file" ]]; then
+            echo -e "${GREEN}✅ Cached: $package-$latest_version${NC}"
+            ((cached_packages++))
+        else
+            echo -e "${BLUE}📥 Downloading: $package-$latest_version${NC}"
+
+            # Download package to cache
+            if sudo pacman -Sw --noconfirm --cachedir "$(pwd)/package_cache" "$package" 2>/dev/null; then
+                echo -e "${GREEN}✅ Downloaded: $package${NC}"
+                ((downloaded_packages++))
+            else
+                echo -e "${YELLOW}⚠️  Failed to download: $package${NC}"
+            fi
+        fi
+    done
+
+    echo -e "${GREEN}📊 Cache Summary:${NC}"
+    echo -e "${GREEN}   Cached packages: $cached_packages${NC}"
+    echo -e "${GREEN}   Downloaded packages: $downloaded_packages${NC}"
+    echo -e "${GREEN}   Total packages: $((cached_packages + downloaded_packages))${NC}"
+
+    # Get cache size
+    local cache_size=$(du -sh package_cache 2>/dev/null | cut -f1)
+    echo -e "${GREEN}💾 Cache size: $cache_size${NC}"
+}
+
 # Step 1: Check for official Arch ISO
 if [[ ! -f "$OFFICIAL_ISO" ]]; then
     echo -e "${RED}❌ Official ISO not found: $OFFICIAL_ISO${NC}"
@@ -164,16 +224,26 @@ ln -sf ../archriot-installer.service "$EXTRACT_DIR/airootfs/etc/systemd/system/m
 
 echo -e "${GREEN}✅ ArchRiot installer added${NC}"
 
-# Step 4: Optional package caching (simplified)
-echo -e "${BLUE}📦 Setting up package cache directory...${NC}"
+# Step 4: Smart package caching
+echo -e "${BLUE}📦 Setting up package cache for offline installation...${NC}"
 
-# Create package cache directory
+# Create package cache directory in extracted ISO
 mkdir -p "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"
 
-# For now, skip package pre-caching to focus on getting a working ISO
-# Packages will be downloaded during installation from internet
-echo -e "${YELLOW}⚠️  Skipping package pre-caching for initial testing${NC}"
-echo -e "${YELLOW}💡 Packages will be downloaded during installation${NC}"
+# Cache packages intelligently (downloads only new/updated packages)
+cache_packages
+
+# Copy cached packages to ISO
+echo -e "${BLUE}📋 Copying cached packages to ISO...${NC}"
+if [[ -d "package_cache" && -n "$(ls -A package_cache 2>/dev/null)" ]]; then
+    sudo cp package_cache/*.pkg.tar.* "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg/" 2>/dev/null || true
+
+    # Count packages copied
+    local pkg_count=$(ls "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"/*.pkg.tar.* 2>/dev/null | wc -l)
+    echo -e "${GREEN}✅ Copied $pkg_count packages to ISO cache${NC}"
+else
+    echo -e "${YELLOW}⚠️  No packages in cache to copy${NC}"
+fi
 
 # Step 5: Repack the ISO with proper UEFI support
 echo -e "${BLUE}📀 Repacking modified ISO with UEFI support...${NC}"

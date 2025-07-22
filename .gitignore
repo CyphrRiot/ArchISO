@@ -48,3 +48,4 @@ local/
 .ropeproject/
 plan.md
 iso_extract/
+package_cache/

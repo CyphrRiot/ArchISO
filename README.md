@@ -139,10 +139,12 @@ This script will:
 
 ### **Current Status**
 
-- ✅ **ISO Creation**: Working UEFI+BIOS hybrid ISO
+- ✅ **ISO Creation**: Working BIOS boot, UEFI boot issues
 - ✅ **TUI Installer**: Complete 560-line installer with WiFi, disk selection, user setup
 - ✅ **Auto-start**: Installer launches automatically on boot
-- 🚧 **Testing Phase**: Ready for hardware testing
+- ✅ **Smart Package Caching**: Downloads/caches ArchRiot packages for offline install
+- 🚨 **UEFI Boot Issue**: ISO hangs on UEFI systems, needs investigation
+- 🚧 **Testing Phase**: Ready for BIOS testing, UEFI troubleshooting needed
 
 ## 📋 File Organization
 
@@ -287,11 +289,48 @@ qemu-system-x86_64 -cdrom out/archriot-*.iso -m 2048 -enable-kvm
 
 This project follows the same license as ArchRiot. See the main ArchRiot repository for license details.
 
+## 🔧 Troubleshooting
+
+### UEFI Boot Issues
+
+**Problem:** ISO hangs at underscore on UEFI systems
+
+**Symptoms:**
+
+- ISO boots fine on BIOS/Legacy mode
+- Hangs at blinking underscore on UEFI systems
+- No boot menu appears
+
+**Potential Causes:**
+
+- EFI boot image path incorrect in xorriso command
+- Missing or corrupted EFI boot files
+- Hybrid ISO creation breaking UEFI compatibility
+
+**Investigation Steps:**
+
+1. Compare our ISO's EFI structure with working Arch ISO
+2. Test with different xorriso EFI parameters
+3. Verify EFI boot image exists and is correct format
+4. Test ISO creation without hybrid mode first
+
+**Workarounds:**
+
+- Boot in Legacy/BIOS mode if available
+- Use official Arch ISO for UEFI systems until fixed
+
 ## 🚧 TODO
 
-### Immediate Testing
+### Critical Issues
 
-- [ ] **Boot test on real hardware** - Verify ISO boots without hanging on UEFI systems
+- [ ] **Fix UEFI boot hanging** - ISO hangs at underscore on UEFI systems
+- [ ] **Investigate xorriso UEFI parameters** - May need different boot image paths
+- [ ] **Test package caching system** - Verify smart caching downloads packages correctly
+- [ ] **Validate offline installation** - Ensure cached packages work without internet
+
+### Hardware Testing
+
+- [ ] **BIOS boot test** - Verify ISO boots on legacy BIOS systems
 - [ ] **Test installer TUI** - Confirm ArchRiot installer appears and is navigable
 - [ ] **WiFi detection test** - Verify wireless networks are detected and connectable
 - [ ] **Disk selection test** - Ensure disk detection and selection works safely
@@ -310,12 +349,19 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 - [ ] **Hardware compatibility testing** - Test on different systems (Intel/AMD, various WiFi chips)
 - [ ] **Documentation completion** - User guide and troubleshooting docs
 
+### Recent Progress
+
+- ✅ **Smart Package Caching** - Implemented intelligent package downloading and caching
+- ✅ **Project Reorganization** - Clean structure with scripts/, configs/, isos/ directories
+- ✅ **Ventoy Integration** - Automatic copy to Ventoy USB with progress indicator
+- ✅ **Git Workflow** - Proper .gitignore excluding ISOs and temporary files
+
 ### Future Enhancements
 
-- [ ] **Package caching** - Pre-cache ArchRiot packages in ISO for offline install
 - [ ] **Multiple timezone support** - Auto-detect or prompt for timezone
 - [ ] **Advanced disk options** - Support for custom partitioning schemes
 - [ ] **Automated testing** - VM-based CI/CD testing pipeline
+- [ ] **Package signature verification** - Verify cached packages before installation
 
 ---
 
