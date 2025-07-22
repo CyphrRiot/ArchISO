@@ -512,7 +512,8 @@ echo -e "${GREEN}🎉🎉🎉 ArchRiot ISO BUILD COMPLETE! 🎉🎉🎉${NC}"
 echo -e "${GREEN}================================================${NC}"
 echo -e "${GREEN}✅ ISO Size: $ISO_SIZE${NC}"
 echo -e "${GREEN}✅ UEFI + BIOS Boot Support${NC}"
-echo -e "${GREEN}✅ Complete Package Cache ($(ls package_cache/*.pkg.tar.* 2>/dev/null | wc -l) packages)${NC}"
+PKG_COUNT=$(ls package_cache/*.pkg.tar.* 2>/dev/null | wc -l)
+echo -e "${GREEN}✅ Complete Package Cache ($PKG_COUNT packages)${NC}"
 echo -e "${GREEN}✅ Seamless Installer Experience${NC}"
 echo -e "${GREEN}✅ Ready for Hardware Testing${NC}"
 echo
