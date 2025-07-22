@@ -1,7 +1,7 @@
-# ArchRiot ISO - COMPLETE Package List for Offline Installation
+# ArchRiot ISO - CACHEABLE Package List for Offline Installation
 # VERIFIED against LOCAL ArchRiot repository: ~/Code/ArchRiot
-# This includes ALL packages needed for both base system AND ArchRiot desktop
-# Based on analysis of actual ArchRiot modules from LOCAL repository
+# ONLY includes packages from official repos that can be cached with pacman
+# AUR packages are installed by ArchRiot setup script when yay is available
 
 # === BASE SYSTEM ESSENTIALS ===
 # Required for basic Arch Linux installation
@@ -138,8 +138,8 @@ swaync
 mpv
 imv
 evince
-brave-bin
-mullvad-vpn-bin
+# brave-bin - AUR package, installed by ArchRiot
+# mullvad-vpn-bin - AUR package, installed by ArchRiot
 
 # === ARCHRIOT APPLICATIONS ===
 # VERIFIED from install/applications/ modules
@@ -152,7 +152,7 @@ lollypop
 totem
 ffmpeg
 yt-dlp
-spotdl
+# spotdl - AUR package, installed by ArchRiot
 
 # Productivity apps (productivity.sh)
 gnome-text-editor
@@ -164,7 +164,7 @@ gnome-clocks
 
 # Utilities (utilities.sh)
 btop
-neofetch
+# neofetch - AUR package, installed by ArchRiot
 fastfetch
 tree
 thunar-volman
@@ -172,10 +172,10 @@ thunar-archive-plugin
 gvfs
 gvfs-mtp
 gnome-system-monitor
-iwgtk
+# iwgtk - AUR package, installed by ArchRiot
 file-roller
 secrets
-featherwallet-bin
+# featherwallet-bin - AUR package, installed by ArchRiot
 fragments
 
 # === ARCHRIOT FONTS ===
@@ -189,13 +189,13 @@ ttf-liberation
 ttf-hack-nerd
 ttf-jetbrains-mono-nerd
 ttf-cascadia-mono-nerd
-ttf-ia-writer
+# ttf-ia-writer - AUR package, installed by ArchRiot
 
 # === ARCHRIOT THEMING ===
 # VERIFIED from install/desktop/theming.sh
-bibata-cursor-theme
-kora-icon-theme
-tela-icon-theme-purple-git
+# bibata-cursor-theme - AUR package, installed by ArchRiot
+# kora-icon-theme - AUR package, installed by ArchRiot
+# tela-icon-theme-purple-git - AUR package, installed by ArchRiot
 gnome-themes-extra
 kvantum-qt5
 

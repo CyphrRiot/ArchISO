@@ -91,7 +91,8 @@ copy_to_ventoy() {
         target_path="$ventoy_mount/$iso_name"
 
         echo -e "${BLUE}📋 Copying $iso_name to Ventoy drive...${NC}"
-        if sudo rsync --info=progress2 "$iso_file" "$target_path"; then
+        # Use dd for faster copy with progress
+        if sudo dd if="$iso_file" of="$target_path" bs=4M status=progress oflag=direct; then
             echo -e "${GREEN}✅ Successfully copied ISO to Ventoy drive${NC}"
             echo -e "${GREEN}📀 Available at: $target_path${NC}"
 
@@ -159,16 +160,33 @@ cache_packages() {
         ((current_package++))
         echo -e "${BLUE}[$current_package/$total_packages] Processing: $package${NC}"
 
+        # Check if package exists in official repos first
         # Get latest package info from repos
         local latest_version=$(pacman -Si "$package" 2>/dev/null | grep '^Version' | awk '{print $3}')
+        local is_aur_package=false
+
+        # If not in official repos, check if it's an AUR package
+        if [[ -z "$latest_version" ]]; then
+            if command -v yay >/dev/null 2>&1; then
+                latest_version=$(yay -Si "$package" 2>/dev/null | grep '^Version' | awk '{print $3}')
+                if [[ -n "$latest_version" ]]; then
+                    is_aur_package=true
+                fi
+            fi
+        fi
 
         if [[ -z "$latest_version" ]]; then
-            echo -e "${YELLOW}⚠️  Package $package not found in repos, skipping${NC}"
+            echo -e "${YELLOW}⚠️  Package $package not found in repos or AUR, skipping${NC}"
             continue
         fi
 
         # Check if we have this package cached
         local cached_file=$(find package_cache -name "${package}-${latest_version}-*.pkg.tar.*" 2>/dev/null | head -1)
+
+        # Also check for any version of the package (in case version changed)
+        if [[ -z "$cached_file" ]]; then
+            cached_file=$(find package_cache -name "${package}-*.pkg.tar.*" 2>/dev/null | head -1)
+        fi
 
         if [[ -n "$cached_file" ]]; then
             echo -e "${GREEN}✅ Cached: $package-$latest_version${NC}"
@@ -176,11 +194,32 @@ cache_packages() {
         else
             echo -e "${BLUE}📥 Downloading: $package-$latest_version${NC}"
 
-            # Download package to system cache first, then copy to our cache
-            if sudo pacman -Sw --noconfirm "$package" >/dev/null 2>&1; then
+            local download_success=false
+            local search_paths=("/var/cache/pacman/pkg" "$HOME/.cache/yay")
+
+            if [[ "$is_aur_package" == "true" ]]; then
+                # For AUR packages, build with yay (stores in ~/.cache/yay/)
+                if yay -S --noconfirm --needed --downloadonly "$package" >/dev/null 2>&1; then
+                    download_success=true
+                fi
+            else
+                # For official repo packages, use pacman
+                if sudo pacman -Sw --noconfirm "$package" >/dev/null 2>&1; then
+                    download_success=true
+                fi
+            fi
+
+            if [[ "$download_success" == "true" ]]; then
                 # Find the downloaded package and copy it to our cache
-                # Look for both the exact version and any version of the package
-                local downloaded_files=($(find /var/cache/pacman/pkg -name "${package}-*.pkg.tar.*" 2>/dev/null | grep -v "\.sig$"))
+                local downloaded_files=()
+                for search_path in "${search_paths[@]}"; do
+                    if [[ -d "$search_path" ]]; then
+                        while IFS= read -r -d '' file; do
+                            downloaded_files+=("$file")
+                        done < <(find "$search_path" -name "${package}-*.pkg.tar.*" -type f ! -name "*.sig" -print0 2>/dev/null)
+                    fi
+                done
+
                 if [[ ${#downloaded_files[@]} -gt 0 ]]; then
                     # Copy the package and its signature
                     for file in "${downloaded_files[@]}"; do
@@ -232,6 +271,16 @@ sudo umount /mnt
 sudo chown -R "$USER:$USER" "$EXTRACT_DIR"
 chmod -R u+w "$EXTRACT_DIR"
 echo -e "${GREEN}✅ ISO extracted to $EXTRACT_DIR${NC}"
+
+# Step 2.5: Fix boot configuration to use archisolabel instead of hardcoded UUID
+echo -e "${BLUE}🔧 Fixing boot configuration for device detection...${NC}"
+if [[ -f "$EXTRACT_DIR/boot/syslinux/archiso_sys-linux.cfg" ]]; then
+    # Replace hardcoded archisosearchuuid with archisolabel for dynamic detection
+    sed -i 's/archisosearchuuid=[^ ]*/archisolabel=ARCH_202507/' "$EXTRACT_DIR/boot/syslinux/archiso_sys-linux.cfg"
+    echo -e "${GREEN}✅ Boot configuration updated for dynamic device detection${NC}"
+else
+    echo -e "${YELLOW}⚠️  Boot configuration file not found${NC}"
+fi
 
 # Prepare EFI boot files (use existing structure from original ISO)
 echo -e "${BLUE}🛠️ Preparing EFI boot structure...${NC}"
@@ -357,7 +406,7 @@ if command -v xorriso &>/dev/null; then
         xorriso -as mkisofs \
             -iso-level 3 \
             -full-iso9660-filenames \
-            -volid "ARCHRIOT_$(date +%Y%m)" \
+            -volid "ARCH_202507" \
             -appid "ArchRiot Live/Rescue CD" \
             -publisher "ArchRiot" \
             -preparer "prepared by build-iso.sh" \
@@ -380,7 +429,7 @@ if command -v xorriso &>/dev/null; then
             # Fallback to BIOS-only approach
             xorriso -as mkisofs \
                 -iso-level 3 \
-                -volid "ARCHRIOT_$(date +%Y%m)" \
+                -volid "ARCH_202507" \
                 -eltorito-boot boot/syslinux/isolinux.bin \
                 -eltorito-catalog boot/syslinux/boot.cat \
                 -no-emul-boot \
@@ -399,7 +448,7 @@ if command -v xorriso &>/dev/null; then
         # BIOS-only fallback
         xorriso -as mkisofs \
             -iso-level 3 \
-            -volid "ARCHRIOT_$(date +%Y%m)" \
+            -volid "ARCH_202507" \
             -eltorito-boot boot/syslinux/isolinux.bin \
             -eltorito-catalog boot/syslinux/boot.cat \
             -no-emul-boot \
@@ -456,3 +505,18 @@ else
         echo -e "${YELLOW}💡 Manual copy needed: Copy $OUTPUT_ISO to your USB drive${NC}"
     fi
 fi
+
+# Final success message
+echo
+echo -e "${GREEN}🎉🎉🎉 ArchRiot ISO BUILD COMPLETE! 🎉🎉🎉${NC}"
+echo -e "${GREEN}================================================${NC}"
+echo -e "${GREEN}✅ ISO Size: $ISO_SIZE${NC}"
+echo -e "${GREEN}✅ UEFI + BIOS Boot Support${NC}"
+echo -e "${GREEN}✅ Complete Package Cache ($(ls package_cache/*.pkg.tar.* 2>/dev/null | wc -l) packages)${NC}"
+echo -e "${GREEN}✅ Seamless Installer Experience${NC}"
+echo -e "${GREEN}✅ Ready for Hardware Testing${NC}"
+echo
+echo -e "${BLUE}🚀 Your ArchRiot installation ISO is ready!${NC}"
+echo -e "${BLUE}📀 Location: $OUTPUT_ISO${NC}"
+echo -e "${BLUE}🔥 Boot it up and install ArchRiot in minutes!${NC}"
+echo

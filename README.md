@@ -47,6 +47,29 @@ ls -la out/
 # Look for: archriot-YYYY.MM.DD-x86_64.iso
 ```
 
+## 📦 Package Caching Strategy
+
+### Official Repository Packages (Pre-cached)
+
+These packages are downloaded during ISO build and cached for offline installation:
+
+- **Base system**: base, linux, networkmanager, cryptsetup, etc.
+- **Desktop environment**: hyprland, waybar, fuzzel, mako, etc.
+- **Applications**: gnome-text-editor, mpv, thunar, firefox alternative
+- **Development tools**: python, git, base-devel (for building AUR packages)
+- **Fonts**: noto-fonts, hack-nerd, jetbrains-mono-nerd, etc.
+
+### AUR Packages (Installed by ArchRiot)
+
+These packages cannot be pre-cached and are installed when ArchRiot setup runs:
+
+- **AUR applications**: brave-bin, mullvad-vpn-bin, neofetch, spotdl
+- **Theming**: bibata-cursor-theme, kora-icon-theme, tela-icon-theme-purple-git
+- **Utilities**: featherwallet-bin, iwgtk
+- **Fonts**: ttf-ia-writer (AUR-only fonts)
+
+This hybrid approach ensures maximum offline capability while maintaining access to essential AUR packages.
+
 ## 💻 Installation Experience
 
 ### 🎬 What Users Will See
@@ -142,7 +165,7 @@ This script will:
 - ✅ **ISO Creation**: Working BIOS and UEFI boot support
 - ✅ **TUI Installer**: Complete 560-line installer with WiFi, disk selection, user setup
 - ✅ **Auto-start**: Installer launches automatically on boot
-- ✅ **Smart Package Caching**: Fixed permission issues, downloads/caches packages correctly
+- ✅ **Smart Package Caching**: Caches official repo packages, AUR packages installed by ArchRiot
 - ✅ **UEFI Boot Fixed**: Now properly detects and uses EFI boot files
 - ✅ **Complete Package List**: 100% verified against local ArchRiot repository
 - 🚧 **Testing Phase**: Ready for both BIOS and UEFI testing
@@ -315,7 +338,7 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 
 - [x] **Fixed UEFI boot hanging** - Now correctly detects BOOTx64.EFI vs bootx64.efi case variations
 - [x] **Fixed xorriso UEFI parameters** - Proper EFI boot file detection and hybrid ISO creation
-- [x] **Fixed package caching system** - Resolved permission issues with pacman cache directory
+- [x] **Fixed package caching system** - Caches official repo packages, AUR handled by ArchRiot
 - [x] **Complete package verification** - Verified all packages against local ArchRiot repository
 - [ ] **Validate offline installation** - Ensure cached packages work without internet
 
@@ -342,7 +365,8 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 
 ### Recent Progress
 
-- ✅ **Complete Package Verification** - Analyzed LOCAL ArchRiot repository (~/Code/ArchRiot) to ensure 100% accurate package list
+- ✅ **Complete Package Verification** - Analyzed LOCAL ArchRiot repository, separated official vs AUR packages
+- ✅ **Package Caching Strategy** - Official repo packages cached in ISO, AUR packages installed by ArchRiot setup
 - ✅ **UEFI Boot Fix** - Fixed case sensitivity issue with EFI boot files (BOOTx64.EFI vs bootx64.efi)
 - ✅ **Package Caching Fix** - Resolved permission issues, now downloads packages correctly
 - ✅ **Smart Package Caching** - Implemented intelligent package downloading and caching
