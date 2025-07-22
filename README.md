@@ -104,18 +104,61 @@ ls -la out/
 
 ```
 ArchISO/
-├── build.sh                              # Main build script
-├── profiledef.sh                         # archiso profile configuration
-├── packages.x86_64                       # Minimal package list (11 packages)
-├── pacman.conf                           # Pacman configuration
-├── syslinux/                             # BIOS boot configuration
-│   └── syslinux.cfg                      # Boot menu for legacy systems
-├── grub/                                 # UEFI boot configuration
-│   └── grub.cfg                          # Boot menu for UEFI systems
-├── airootfs/                             # Files included in live environment
-│   ├── usr/local/bin/archriot-installer  # Main TUI installer script (400+ lines)
+├── build-iso.sh                          # 🏗️ MAIN ISO builder (UEFI+BIOS hybrid)
+├── isos/                                 # 💿 ISO files (not in git)
+│   ├── archlinux.iso                     # Original Arch Linux ISO
+│   └── archriot-2025.iso                 # Generated ArchRiot ISO
+├── airootfs/                             # 📁 Files added to live environment
+│   ├── usr/local/bin/archriot-installer  # Main TUI installer (560+ lines)
 │   └── etc/systemd/system/               # Auto-start service configuration
+├── scripts/                             # 🔧 Utility scripts
+│   ├── build-archiso.sh                  # Complex archiso build (deprecated)
+│   └── extract-packages.sh               # Package extraction utility
+├── configs/                             # ⚙️ Configuration files
+│   ├── packages.x86_64                   # Package list for archiso build
+│   ├── pacman.conf                       # Pacman configuration
+│   └── profiledef.sh                     # archiso profile configuration
 └── README.md                             # This file
+```
+
+## 🚀 Quick Start
+
+### **Create ArchRiot ISO**
+
+```bash
+# Create ArchRiot ISO with installer
+./build-iso.sh
+```
+
+This script will:
+
+1. Extract the official Arch Linux ISO (`isos/archlinux.iso`)
+2. Add ArchRiot installer and service files
+3. Create `isos/archriot-2025.iso` with UEFI+BIOS support
+4. Optionally copy to Ventoy USB drive for testing
+
+### **Current Status**
+
+- ✅ **ISO Creation**: Working UEFI+BIOS hybrid ISO
+- ✅ **TUI Installer**: Complete 560-line installer with WiFi, disk selection, user setup
+- ✅ **Auto-start**: Installer launches automatically on boot
+- 🚧 **Testing Phase**: Ready for hardware testing
+
+## 📋 File Organization
+
+| Path                          | Purpose                     | Status         |
+| ----------------------------- | --------------------------- | -------------- |
+| `build-iso.sh`                | **Main ISO creator**        | ✅ **Current** |
+| `scripts/build-archiso.sh`    | Complex archiso build       | ❌ Deprecated  |
+| `scripts/extract-packages.sh` | Package extraction utility  | 🔧 Utility     |
+| `configs/`                    | archiso configuration files | 🔧 Config      |
+| `isos/`                       | ISO files (not in git)      | 💿 Storage     |
+
+## 🔧 Prerequisites
+
+```bash
+# Required packages
+sudo pacman -S xorriso syslinux cdrtools
 ```
 
 ## 🛠️ Usage Instructions
@@ -243,6 +286,36 @@ qemu-system-x86_64 -cdrom out/archriot-*.iso -m 2048 -enable-kvm
 ## 📄 License
 
 This project follows the same license as ArchRiot. See the main ArchRiot repository for license details.
+
+## 🚧 TODO
+
+### Immediate Testing
+
+- [ ] **Boot test on real hardware** - Verify ISO boots without hanging on UEFI systems
+- [ ] **Test installer TUI** - Confirm ArchRiot installer appears and is navigable
+- [ ] **WiFi detection test** - Verify wireless networks are detected and connectable
+- [ ] **Disk selection test** - Ensure disk detection and selection works safely
+
+### Installer Validation
+
+- [ ] **Complete installation flow** - Test full install from WiFi → user setup → ArchRiot
+- [ ] **archinstall integration** - Verify automated archinstall execution works
+- [ ] **Post-install ArchRiot setup** - Confirm ArchRiot desktop installs correctly
+- [ ] **First boot verification** - Test system boots to ArchRiot desktop after install
+
+### Polish & Distribution
+
+- [ ] **Error handling improvements** - Better error messages and recovery
+- [ ] **Installation progress indicators** - Show progress during long operations
+- [ ] **Hardware compatibility testing** - Test on different systems (Intel/AMD, various WiFi chips)
+- [ ] **Documentation completion** - User guide and troubleshooting docs
+
+### Future Enhancements
+
+- [ ] **Package caching** - Pre-cache ArchRiot packages in ISO for offline install
+- [ ] **Multiple timezone support** - Auto-detect or prompt for timezone
+- [ ] **Advanced disk options** - Support for custom partitioning schemes
+- [ ] **Automated testing** - VM-based CI/CD testing pipeline
 
 ---
 

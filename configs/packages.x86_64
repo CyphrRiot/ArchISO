@@ -1,0 +1,105 @@
+# ArchRiot ISO - Minimal Working Package List
+# Based on releng profile but stripped to essentials
+
+# Base system
+base
+linux
+linux-firmware
+linux-firmware-marvell
+
+# Install tools
+arch-install-scripts
+archinstall
+
+# Boot essentials
+efibootmgr
+grub
+syslinux
+
+# Device and filesystem support
+cryptsetup
+device-mapper
+lvm2
+dosfstools
+e2fsprogs
+btrfs-progs
+gptfdisk
+
+# Network essentials
+networkmanager
+iw
+iwd
+dhcpcd
+
+# System utilities
+sudo
+nano
+dialog
+curl
+wget
+
+# Hardware support
+intel-ucode
+amd-ucode
+
+# Terminal and basic tools
+less
+man-db
+man-pages
+
+# Essential for live environment
+mkinitcpio
+mkinitcpio-archiso
+edk2-shell
+
+# ArchRiot Desktop Environment - Hyprland Core
+hyprland
+xdg-desktop-portal-hyprland
+xdg-desktop-portal-gtk
+polkit-gnome
+
+# ArchRiot Desktop Environment - Essential Tools
+waybar
+fuzzel
+mako
+swaybg
+hyprlock
+hypridle
+grim
+slurp
+hyprpicker
+
+# ArchRiot System - Audio & Media
+pipewire
+pipewire-alsa
+pipewire-jack
+pipewire-pulse
+pavucontrol
+ffmpeg
+mpv
+
+# ArchRiot System - Fonts & Theming
+ttf-fira-code
+ttf-nerd-fonts-symbols
+papirus-icon-theme
+gnome-themes-extra
+
+# ArchRiot Applications - Core
+firefox
+nautilus
+gnome-text-editor
+gnome-calculator
+gnome-system-monitor
+btop
+
+# ArchRiot Development Tools
+git
+github-cli
+neovim
+python
+python-pip
+
+# ArchRiot System - Power & Hardware
+tlp
+bluez
+bluez-utils
