@@ -27,10 +27,19 @@ cleanup() {
     # Unmount any potential mount points
     sudo umount /mnt 2>/dev/null || true
     sudo umount "$EXTRACT_DIR" 2>/dev/null || true
-    # Clean up directories
-    sudo rm -rf "$EXTRACT_DIR" work_dir
+    sudo umount efi_mnt 2>/dev/null || true
+    # Only clean up on successful completion or explicit request
+    if [[ "$CLEANUP_ON_EXIT" == "true" ]]; then
+        sudo rm -rf "$EXTRACT_DIR" work_dir efi_mnt
+        rm -f efiboot.img
+    else
+        echo -e "${BLUE}💡 Keeping $EXTRACT_DIR for debugging/resuming${NC}"
+    fi
 }
 trap cleanup EXIT
+
+# Set cleanup behavior (only clean up on successful completion)
+CLEANUP_ON_EXIT="false"
 
 # Function to copy ISO to Ventoy drive
 copy_to_ventoy() {
@@ -114,8 +123,21 @@ copy_to_ventoy() {
 cache_packages() {
     echo -e "${BLUE}🗄️  Checking package cache...${NC}"
 
+    # Ask user if they want to cache packages (can be time consuming)
+    echo -e "${YELLOW}⚠️  Package caching can take 10-15 minutes for 71 packages${NC}"
+    read -p "Cache packages for offline installation? [Y/n]: " -r
+    echo
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        echo -e "${BLUE}⏭️  Skipping package caching${NC}"
+        return 0
+    fi
+
     # Create cache directory if it doesn't exist
     mkdir -p package_cache
+
+    # Fix permissions for package cache
+    sudo chown root:root package_cache 2>/dev/null || true
+    sudo chmod 755 package_cache 2>/dev/null || true
 
     # Check if we have the package list
     if [[ ! -f "configs/packages.x86_64" ]]; then
@@ -128,11 +150,15 @@ cache_packages() {
     local total_packages=${#packages[@]}
     local cached_packages=0
     local downloaded_packages=0
+    local current_package=0
 
     echo -e "${BLUE}📋 Found $total_packages packages to cache${NC}"
 
     # Check which packages are already cached and up-to-date
     for package in "${packages[@]}"; do
+        ((current_package++))
+        echo -e "${BLUE}[$current_package/$total_packages] Processing: $package${NC}"
+
         # Get latest package info from repos
         local latest_version=$(pacman -Si "$package" 2>/dev/null | grep '^Version' | awk '{print $3}')
 
@@ -150,10 +176,24 @@ cache_packages() {
         else
             echo -e "${BLUE}📥 Downloading: $package-$latest_version${NC}"
 
-            # Download package to cache
-            if sudo pacman -Sw --noconfirm --cachedir "$(pwd)/package_cache" "$package" 2>/dev/null; then
-                echo -e "${GREEN}✅ Downloaded: $package${NC}"
-                ((downloaded_packages++))
+            # Download package to system cache first, then copy to our cache
+            if sudo pacman -Sw --noconfirm "$package" >/dev/null 2>&1; then
+                # Find the downloaded package and copy it to our cache
+                # Look for both the exact version and any version of the package
+                local downloaded_files=($(find /var/cache/pacman/pkg -name "${package}-*.pkg.tar.*" 2>/dev/null | grep -v "\.sig$"))
+                if [[ ${#downloaded_files[@]} -gt 0 ]]; then
+                    # Copy the package and its signature
+                    for file in "${downloaded_files[@]}"; do
+                        if [[ ! -f "package_cache/$(basename "$file")" ]]; then
+                            sudo cp "$file" package_cache/ 2>/dev/null || true
+                            sudo cp "$file.sig" package_cache/ 2>/dev/null || true
+                        fi
+                    done
+                    echo -e "${GREEN}✅ Downloaded: $package${NC}"
+                    ((downloaded_packages++))
+                else
+                    echo -e "${YELLOW}⚠️  Downloaded but couldn't find package files: $package${NC}"
+                fi
             else
                 echo -e "${YELLOW}⚠️  Failed to download: $package${NC}"
             fi
@@ -193,6 +233,16 @@ sudo chown -R "$USER:$USER" "$EXTRACT_DIR"
 chmod -R u+w "$EXTRACT_DIR"
 echo -e "${GREEN}✅ ISO extracted to $EXTRACT_DIR${NC}"
 
+# Prepare EFI boot files (use existing structure from original ISO)
+echo -e "${BLUE}🛠️ Preparing EFI boot structure...${NC}"
+# Ensure EFI directory exists and is properly set up
+if [[ -d "$EXTRACT_DIR/EFI" ]]; then
+    echo -e "${GREEN}✅ EFI directory found in original ISO${NC}"
+else
+    echo -e "${RED}❌ EFI directory not found in original ISO${NC}"
+    exit 1
+fi
+
 # Step 3: Add our ArchRiot installer
 echo -e "${BLUE}⚙️  Adding ArchRiot installer...${NC}"
 
@@ -218,9 +268,45 @@ chmod +x "$EXTRACT_DIR/airootfs/usr/local/bin/archriot-installer"
 mkdir -p "$EXTRACT_DIR/airootfs/etc/systemd/system"
 cp airootfs/etc/systemd/system/archriot-installer.service "$EXTRACT_DIR/airootfs/etc/systemd/system/"
 
-# Enable the service
-mkdir -p "$EXTRACT_DIR/airootfs/etc/systemd/system/multi-user.target.wants"
-ln -sf ../archriot-installer.service "$EXTRACT_DIR/airootfs/etc/systemd/system/multi-user.target.wants/"
+# Replace getty@tty1 to directly launch installer (seamless experience)
+mkdir -p "$EXTRACT_DIR/airootfs/etc/systemd/system"
+cat > "$EXTRACT_DIR/airootfs/etc/systemd/system/getty@tty1.service" << 'EOF'
+[Unit]
+Description=ArchRiot Installer on %I
+Documentation=man:agetty(8) man:systemd-getty-generator(8)
+Documentation=http://0pointer.de/blog/projects/serial-console.html
+After=systemd-user-sessions.service plymouth-quit-wait.service
+After=rc-local.service
+Before=getty.target
+IgnoreOnIsolate=yes
+ConditionPathExists=/dev/tty0
+
+[Service]
+ExecStart=/usr/local/bin/archriot-installer
+Type=idle
+Restart=no
+RestartSec=0
+UtmpIdentifier=%I
+TTYPath=/dev/%I
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+KillMode=process
+IgnoreSIGPIPE=no
+SendSIGHUP=yes
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+User=root
+Environment=TERM=linux
+
+[Install]
+WantedBy=getty.target
+EOF
+
+# Disable the original archriot-installer.service since we're replacing getty directly
+# Remove the service file we copied earlier
+rm -f "$EXTRACT_DIR/airootfs/etc/systemd/system/archriot-installer.service"
 
 echo -e "${GREEN}✅ ArchRiot installer added${NC}"
 
@@ -231,7 +317,9 @@ echo -e "${BLUE}📦 Setting up package cache for offline installation...${NC}"
 mkdir -p "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"
 
 # Cache packages intelligently (downloads only new/updated packages)
+set +e  # Temporarily disable exit on error for package caching
 cache_packages
+set -e  # Re-enable exit on error
 
 # Copy cached packages to ISO
 echo -e "${BLUE}📋 Copying cached packages to ISO...${NC}"
@@ -239,7 +327,7 @@ if [[ -d "package_cache" && -n "$(ls -A package_cache 2>/dev/null)" ]]; then
     sudo cp package_cache/*.pkg.tar.* "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg/" 2>/dev/null || true
 
     # Count packages copied
-    local pkg_count=$(ls "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"/*.pkg.tar.* 2>/dev/null | wc -l)
+    pkg_count=$(ls "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"/*.pkg.tar.* 2>/dev/null | wc -l)
     echo -e "${GREEN}✅ Copied $pkg_count packages to ISO cache${NC}"
 else
     echo -e "${YELLOW}⚠️  No packages in cache to copy${NC}"
@@ -248,28 +336,67 @@ fi
 # Step 5: Repack the ISO with proper UEFI support
 echo -e "${BLUE}📀 Repacking modified ISO with UEFI support...${NC}"
 
-# Use xorriso with simpler approach - let it auto-detect boot structure
+# Use xorriso with proper UEFI support (mimicking archiso approach)
 if command -v xorriso &>/dev/null; then
     echo -e "${BLUE}🔧 Using xorriso for UEFI+BIOS boot...${NC}"
 
-    # Simple xorriso command that preserves existing boot structure
-    xorriso -as mkisofs \
-        -iso-level 3 \
-        -full-iso9660-filenames \
-        -volid "ARCHRIOT_$(date +%Y%m)" \
-        -eltorito-boot boot/syslinux/isolinux.bin \
-        -eltorito-catalog boot/syslinux/boot.cat \
-        -no-emul-boot \
-        -boot-load-size 4 \
-        -boot-info-table \
-        -isohybrid-mbr "$EXTRACT_DIR/boot/syslinux/isohdpfx.bin" \
-        -output "$OUTPUT_ISO" \
-        "$EXTRACT_DIR/" && {
-        echo -e "${GREEN}✅ ISO created with UEFI+BIOS support${NC}"
-    } || {
-        echo -e "${YELLOW}⚠️  Advanced xorriso failed, trying basic approach...${NC}"
+    # Check if EFI boot files exist (handle case variations)
+    EFI_BOOT_FILE=""
+    if [[ -f "$EXTRACT_DIR/EFI/BOOT/bootx64.efi" ]]; then
+        EFI_BOOT_FILE="EFI/BOOT/bootx64.efi"
+        echo -e "${GREEN}✅ Found bootx64.efi (lowercase)${NC}"
+    elif [[ -f "$EXTRACT_DIR/EFI/BOOT/BOOTx64.EFI" ]]; then
+        EFI_BOOT_FILE="EFI/BOOT/BOOTx64.EFI"
+        echo -e "${GREEN}✅ Found BOOTx64.EFI (uppercase)${NC}"
+    fi
 
-        # Fallback to basic approach
+    if [[ -n "$EFI_BOOT_FILE" ]]; then
+        echo -e "${BLUE}🔧 Creating hybrid ISO with native EFI support...${NC}"
+
+        # Create ISO with both BIOS and UEFI boot support
+        xorriso -as mkisofs \
+            -iso-level 3 \
+            -full-iso9660-filenames \
+            -volid "ARCHRIOT_$(date +%Y%m)" \
+            -appid "ArchRiot Live/Rescue CD" \
+            -publisher "ArchRiot" \
+            -preparer "prepared by build-iso.sh" \
+            -eltorito-boot boot/syslinux/isolinux.bin \
+            -eltorito-catalog boot/syslinux/boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            -isohybrid-mbr "$EXTRACT_DIR/boot/syslinux/isohdpfx.bin" \
+            -eltorito-alt-boot \
+            -e "$EFI_BOOT_FILE" \
+            -no-emul-boot \
+            -isohybrid-gpt-basdat \
+            -output "$OUTPUT_ISO" \
+            "$EXTRACT_DIR/" && {
+            echo -e "${GREEN}✅ ISO created with UEFI+BIOS support${NC}"
+        } || {
+            echo -e "${YELLOW}⚠️  UEFI ISO creation failed, trying BIOS-only...${NC}"
+
+            # Fallback to BIOS-only approach
+            xorriso -as mkisofs \
+                -iso-level 3 \
+                -volid "ARCHRIOT_$(date +%Y%m)" \
+                -eltorito-boot boot/syslinux/isolinux.bin \
+                -eltorito-catalog boot/syslinux/boot.cat \
+                -no-emul-boot \
+                -boot-load-size 4 \
+                -boot-info-table \
+                -output "$OUTPUT_ISO" \
+                "$EXTRACT_DIR/" || {
+                echo -e "${RED}❌ Failed to create ISO with xorriso${NC}"
+                exit 1
+            }
+        }
+    else
+        echo -e "${YELLOW}⚠️  No EFI boot files found (checked bootx64.efi and BOOTx64.EFI)${NC}"
+        echo -e "${YELLOW}⚠️  Creating BIOS-only ISO...${NC}"
+
+        # BIOS-only fallback
         xorriso -as mkisofs \
             -iso-level 3 \
             -volid "ARCHRIOT_$(date +%Y%m)" \
@@ -283,21 +410,20 @@ if command -v xorriso &>/dev/null; then
             echo -e "${RED}❌ Failed to create ISO with xorriso${NC}"
             exit 1
         }
-    }
+    fi
 else
     echo -e "${RED}❌ xorriso not found${NC}"
     echo -e "${YELLOW}💡 Install libisoburn package: sudo pacman -S libisoburn${NC}"
     exit 1
 fi
 
-# Make the ISO hybrid (bootable from USB)
-if command -v isohybrid &>/dev/null; then
-    echo -e "${BLUE}🔧 Making ISO hybrid bootable...${NC}"
+# The ISO should already be hybrid from xorriso with -isohybrid-gpt-basdat
+# Only run isohybrid if we created a BIOS-only ISO
+if [[ -z "$EFI_BOOT_FILE" ]] && command -v isohybrid &>/dev/null; then
+    echo -e "${BLUE}🔧 Making BIOS-only ISO hybrid bootable...${NC}"
     isohybrid "$OUTPUT_ISO" || {
         echo -e "${YELLOW}⚠️  isohybrid failed, but ISO should still be bootable${NC}"
     }
-else
-    echo -e "${YELLOW}⚠️  isohybrid not found, install syslinux package for USB boot support${NC}"
 fi
 
 echo -e "${GREEN}✅ ISO repacked as $OUTPUT_ISO${NC}"
@@ -309,6 +435,9 @@ echo -e "${GREEN}📏 Final ISO size: $ISO_SIZE${NC}"
 echo -e "${GREEN}🎉 ArchRiot ISO modification complete!${NC}"
 echo -e "${GREEN}📀 Output: $OUTPUT_ISO${NC}"
 echo -e "${YELLOW}💡 This ISO now includes ArchRiot installer and cached packages${NC}"
+
+# Mark for successful cleanup
+CLEANUP_ON_EXIT="true"
 
 # Offer to copy to USB
 echo

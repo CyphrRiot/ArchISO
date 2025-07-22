@@ -1,22 +1,27 @@
-# ArchRiot ISO - Minimal Working Package List
-# Based on releng profile but stripped to essentials
+# ArchRiot ISO - COMPLETE Package List for Offline Installation
+# VERIFIED against LOCAL ArchRiot repository: ~/Code/ArchRiot
+# This includes ALL packages needed for both base system AND ArchRiot desktop
+# Based on analysis of actual ArchRiot modules from LOCAL repository
 
-# Base system
+# === BASE SYSTEM ESSENTIALS ===
+# Required for basic Arch Linux installation
 base
 linux
 linux-firmware
 linux-firmware-marvell
 
-# Install tools
+# === INSTALL TOOLS ===
+# Required for archinstall to function
 arch-install-scripts
 archinstall
 
-# Boot essentials
+# === BOOT ESSENTIALS ===
+# Required for system boot
 efibootmgr
-grub
 syslinux
 
-# Device and filesystem support
+# === FILESYSTEM SUPPORT ===
+# Required for disk partitioning and encryption
 cryptsetup
 device-mapper
 lvm2
@@ -25,81 +30,178 @@ e2fsprogs
 btrfs-progs
 gptfdisk
 
-# Network essentials
+# === NETWORK ESSENTIALS ===
+# Required for internet connectivity
 networkmanager
 iw
 iwd
 dhcpcd
 
-# System utilities
+# === SYSTEM UTILITIES ===
+# Required for basic system operation
 sudo
 nano
 dialog
 curl
 wget
+git
 
-# Hardware support
+# === HARDWARE SUPPORT ===
+# Required for CPU microcode
 intel-ucode
 amd-ucode
 
-# Terminal and basic tools
+# === TERMINAL AND BASIC TOOLS ===
+# Required for live environment
 less
 man-db
 man-pages
 
-# Essential for live environment
+# === LIVE ENVIRONMENT ===
+# Required for archiso to function
 mkinitcpio
 mkinitcpio-archiso
 edk2-shell
 
-# ArchRiot Desktop Environment - Hyprland Core
+# === DEVELOPMENT ESSENTIALS ===
+# Required for yay and AUR builds (ArchRiot needs yay)
+base-devel
+python
+python-pip
+
+# === SYSTEM MANAGEMENT ===
+# Essential utilities
+openssh
+rsync
+unzip
+zip
+htop
+
+# === BLUETOOTH BASE ===
+# Basic bluetooth support
+bluez
+bluez-utils
+
+# === ARCHRIOT DESKTOP - HYPRLAND CORE ===
+# VERIFIED from install/desktop/hyprland.sh
 hyprland
 xdg-desktop-portal-hyprland
 xdg-desktop-portal-gtk
 polkit-gnome
-
-# ArchRiot Desktop Environment - Essential Tools
 waybar
 fuzzel
 mako
 swaybg
 hyprlock
 hypridle
+swayosd
 grim
 slurp
+hyprshot
 hyprpicker
+hyprland-qtutils
+kooha
+gst-libav
+gst-plugins-ugly
+x264
+nwg-displays
+python-psutil
 
-# ArchRiot System - Audio & Media
+# === ARCHRIOT DESKTOP APPS ===
+# VERIFIED from install/desktop/apps.sh
+ghostty
+ghostty-shell-integration
+brightnessctl
+playerctl
+pamixer
+pavucontrol
+wireplumber
+xdg-user-dirs
+fcitx5
+fcitx5-gtk
+fcitx5-qt
+fcitx5-configtool
+wl-clip-persist
+gnome-keyring
+hyprsunset
+thunar
+sushi
+ffmpegthumbnailer
+tumbler
+libwebp
+libheif
+libavif
+raw-thumbnailer
+gnome-calculator
+nwg-drawer
+swaync
+mpv
+imv
+evince
+brave-bin
+mullvad-vpn-bin
+
+# === ARCHRIOT APPLICATIONS ===
+# VERIFIED from install/applications/ modules
+
+# Communication apps (communication.sh)
+signal-desktop
+
+# Media apps (media.sh)
+lollypop
+totem
+ffmpeg
+yt-dlp
+spotdl
+
+# Productivity apps (productivity.sh)
+gnome-text-editor
+zed
+abiword
+papers
+p7zip
+gnome-clocks
+
+# Utilities (utilities.sh)
+btop
+neofetch
+fastfetch
+tree
+thunar-volman
+thunar-archive-plugin
+gvfs
+gvfs-mtp
+gnome-system-monitor
+iwgtk
+file-roller
+secrets
+featherwallet-bin
+fragments
+
+# === ARCHRIOT FONTS ===
+# VERIFIED from install/desktop/fonts.sh
+ttf-font-awesome
+noto-fonts
+noto-fonts-emoji
+noto-fonts-cjk
+noto-fonts-extra
+ttf-liberation
+ttf-hack-nerd
+ttf-jetbrains-mono-nerd
+ttf-cascadia-mono-nerd
+ttf-ia-writer
+
+# === ARCHRIOT THEMING ===
+# VERIFIED from install/desktop/theming.sh
+bibata-cursor-theme
+kora-icon-theme
+tela-icon-theme-purple-git
+gnome-themes-extra
+kvantum-qt5
+
+# === AUDIO SYSTEM ===
+# Required for desktop audio (referenced multiple times)
 pipewire
 pipewire-alsa
-pipewire-jack
 pipewire-pulse
-pavucontrol
-ffmpeg
-mpv
-
-# ArchRiot System - Fonts & Theming
-ttf-fira-code
-ttf-nerd-fonts-symbols
-papirus-icon-theme
-gnome-themes-extra
-
-# ArchRiot Applications - Core
-firefox
-nautilus
-gnome-text-editor
-gnome-calculator
-gnome-system-monitor
-btop
-
-# ArchRiot Development Tools
-git
-github-cli
-neovim
-python
-python-pip
-
-# ArchRiot System - Power & Hardware
-tlp
-bluez
-bluez-utils
+pipewire-jack
