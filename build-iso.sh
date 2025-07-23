@@ -24,15 +24,20 @@ OUTPUT_ISO="isos/archriot-2025.iso"
 
 # Cleanup function
 cleanup() {
-    echo -e "${YELLOW}🧹 Cleaning up...${NC}"
-    # Unmount any potential mount points
+    # Silent cleanup on exit - main cleanup happens before celebration
     sudo umount /mnt 2>/dev/null || true
     sudo umount "$EXTRACT_DIR" 2>/dev/null || true
     sudo umount "$BUILD_DIR/efi_mnt" 2>/dev/null || true
+}
+
+# Manual cleanup function for successful builds
+do_cleanup() {
+    echo -e "${YELLOW}🧹 Cleaning up temporary files...${NC}"
     # Only clean up on successful completion or explicit request
     if [[ "$CLEANUP_ON_EXIT" == "true" ]]; then
         sudo rm -rf "$EXTRACT_DIR" "$BUILD_DIR/work_dir" "$BUILD_DIR/efi_mnt"
         rm -f "$BUILD_DIR/efiboot.img"
+        echo -e "${GREEN}✅ Cleanup complete${NC}"
     else
         echo -e "${BLUE}💡 Keeping $BUILD_DIR for debugging/resuming${NC}"
     fi
@@ -566,6 +571,9 @@ if [[ -n "$ACTUAL_UUID" ]]; then
     sudo cp -r /mnt/* "$TEMP_EXTRACT/"
     sudo umount /mnt
 
+    # Convert UUID timestamp to xorriso modification-date format (YYYY-MM-DD-HH-MM-SS-00 -> YYYYMMDDhhmmss00)
+    XORRISO_TIMESTAMP=$(echo "$ACTUAL_UUID" | sed 's/-//g')
+
     # Make writable
     sudo chown -R "$USER:$USER" "$TEMP_EXTRACT"
     chmod -R u+w "$TEMP_EXTRACT"
@@ -608,6 +616,7 @@ if [[ -n "$ACTUAL_UUID" ]]; then
                 -appid "ArchRiot Live/Rescue CD" \
                 -publisher "ArchRiot" \
                 -preparer "prepared by build-iso.sh" \
+                --modification-date="$XORRISO_TIMESTAMP" \
                 -eltorito-boot boot/syslinux/isolinux.bin \
                 -eltorito-catalog boot/syslinux/boot.cat \
                 -no-emul-boot \
@@ -687,10 +696,13 @@ fi
 # Mark for successful cleanup
 CLEANUP_ON_EXIT="true"
 
+# Clean up temporary files before celebration
+do_cleanup
+
 # Offer to copy to USB
 echo
 echo -e "${BLUE}🚀 Build verified and ready for testing!${NC}"
-read -p "Would you like to copy to USB? [Y/n]: " -n 1 -r
+read -p "Would you like to copy to USB? [Y/n]: " -r
 echo
 
 if [[ $REPLY =~ ^[Nn]$ ]]; then
@@ -701,11 +713,11 @@ else
     if copy_to_ventoy "$OUTPUT_ISO"; then
         echo -e "${GREEN}🎯 Ready to test on hardware! Just boot from USB and select the ISO.${NC}"
     else
-        echo -e "${YELLOW}💡 Manual copy needed: Copy $OUTPUT_ISO to your USB drive${NC}"
+        echo -e "${YELLOW}⚠️  USB copy failed or no Ventoy drive found${NC}"
+        echo -e "${YELLOW}💡 You can manually copy: $OUTPUT_ISO${NC}"
     fi
 fi
 
-# Final success message
 echo
 echo -e "${GREEN}🎉🎉🎉 ArchRiot ISO BUILD COMPLETE! 🎉🎉🎉${NC}"
 echo -e "${GREEN}================================================${NC}"
@@ -715,8 +727,9 @@ PKG_COUNT=$(ls "$BUILD_DIR/package_cache"/*.pkg.tar.* 2>/dev/null | wc -l)
 echo -e "${GREEN}✅ Complete Package Cache ($PKG_COUNT packages)${NC}"
 echo -e "${GREEN}✅ Seamless Installer Experience${NC}"
 echo -e "${GREEN}✅ Ready for Hardware Testing${NC}"
+
 echo
-echo -e "${BLUE}🚀 Your ArchRiot installation ISO is ready!${NC}"
-echo -e "${BLUE}📀 Location: $OUTPUT_ISO${NC}"
-echo -e "${BLUE}🔥 Boot it up and install ArchRiot in minutes!${NC}"
+echo -e "${GREEN}🚀 Your ArchRiot installation ISO is ready!${NC}"
+echo -e "${GREEN}📀 Location: $OUTPUT_ISO${NC}"
+echo -e "${GREEN}🔥 Boot it up and install ArchRiot in minutes!${NC}"
 echo
