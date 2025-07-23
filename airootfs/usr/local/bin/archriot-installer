@@ -1,0 +1,731 @@
+#!/bin/bash
+
+# ArchRiot Automated Installer
+# A simple TUI installer that automates the ArchRiot installation process
+# Following the exact guidelines from ArchRiot README.md
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Global variables
+SELECTED_DISK=""
+USERNAME=""
+PASSWORD=""
+ROOT_PASSWORD=""
+LUKS_PASSWORD=""
+HOSTNAME=""
+WIFI_INTERFACE=""
+SELECTED_TIMEZONE=""
+SELECTED_KEYBOARD=""
+ARCHINSTALL_CONFIG="/tmp/archriot-config.json"
+
+# Logging function
+log() {
+    echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# Check if dialog is available, fallback to basic prompts
+if ! command -v dialog &> /dev/null; then
+    warn "Dialog not available, using basic prompts"
+    USE_DIALOG=false
+else
+    USE_DIALOG=true
+fi
+
+# Dialog wrapper functions
+show_dialog() {
+    if $USE_DIALOG; then
+        dialog "$@"
+    else
+        # Fallback for basic prompts
+        case "$1" in
+            --msgbox)
+                echo "$3"
+                read -p "Press Enter to continue..."
+                ;;
+            --yesno)
+                while true; do
+                    read -p "$3 (y/n): " yn
+                    case $yn in
+                        [Yy]* ) return 0;;
+                        [Nn]* ) return 1;;
+                        * ) echo "Please answer yes or no.";;
+                    esac
+                done
+                ;;
+        esac
+    fi
+}
+
+input_dialog() {
+    if $USE_DIALOG; then
+        dialog --inputbox "$1" 10 60 2>/tmp/input_result
+        if [ $? -eq 0 ]; then
+            cat /tmp/input_result
+            rm -f /tmp/input_result
+        else
+            echo ""
+        fi
+    else
+        read -p "$1: " input
+        echo "$input"
+    fi
+}
+
+password_dialog() {
+    if $USE_DIALOG; then
+        dialog --passwordbox "$1" 10 60 2>/tmp/password_result
+        if [ $? -eq 0 ]; then
+            cat /tmp/password_result
+            rm -f /tmp/password_result
+        else
+            echo ""
+        fi
+    else
+        read -s -p "$1: " password
+        echo
+        echo "$password"
+    fi
+}
+
+menu_dialog() {
+    local title="$1"
+    local text="$2"
+    shift 2
+
+    if $USE_DIALOG; then
+        dialog --menu "$title" 20 70 10 "$@" 2>/tmp/menu_result
+        if [ $? -eq 0 ]; then
+            cat /tmp/menu_result
+            rm -f /tmp/menu_result
+        else
+            echo ""
+        fi
+    else
+        echo "$text"
+        local i=1
+        while [ $# -gt 0 ]; do
+            echo "$i) $2"
+            shift 2
+            i=$((i + 1))
+        done
+        read -p "Select option: " choice
+        # This is simplified for the fallback
+        echo "$choice"
+    fi
+}
+
+# Welcome screen
+show_welcome() {
+    clear
+    show_dialog --msgbox "🏴‍☠️ ArchRiot Installer
+
+Welcome to the ArchRiot automated installer!
+
+This installer will:
+• Set up WiFi (if needed)
+• Select installation disk
+• Configure user account
+• Install Arch Linux with ArchRiot-optimized settings
+• Install ArchRiot desktop environment
+
+The installation follows the exact process from the ArchRiot README.md
+
+IMPORTANT: Disk encryption (LUKS) is required and will be enabled automatically." 18 70
+
+    if ! show_dialog --yesno "Do you want to continue with the ArchRiot installation?" 8 60; then
+        exit 0
+    fi
+}
+
+# Check internet connectivity
+check_internet() {
+    log "Checking internet connectivity..."
+
+    if ping -c 1 google.com &>/dev/null || ping -c 1 8.8.8.8 &>/dev/null; then
+        success "Internet connection available"
+        return 0
+    else
+        error "No internet connection detected"
+        return 1
+    fi
+}
+
+# WiFi setup function
+setup_wifi() {
+    log "Checking network connectivity..."
+
+    # Check if already connected
+    if check_internet; then
+        log "Already connected to internet, skipping WiFi setup"
+        return 0
+    fi
+
+    # Check for wireless interfaces
+    WIFI_INTERFACES=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || echo "")
+
+    if [ -z "$WIFI_INTERFACES" ]; then
+        error "No WiFi interfaces found. Please connect ethernet cable."
+        exit 1
+    fi
+
+    # Use first WiFi interface
+    WIFI_INTERFACE=$(echo "$WIFI_INTERFACES" | head -1)
+    log "Found WiFi interface: $WIFI_INTERFACE"
+
+    show_dialog --msgbox "WiFi Setup Required
+
+No internet connection detected.
+Setting up WiFi on interface: $WIFI_INTERFACE
+
+The next screen will scan for networks..." 10 60
+
+    # Scan for networks
+    log "Scanning for WiFi networks..."
+    iwctl station "$WIFI_INTERFACE" scan
+    sleep 3
+
+    # Get available networks
+    NETWORKS=$(iwctl station "$WIFI_INTERFACE" get-networks | grep -v "Available networks" | grep -v "^$" | awk 'NR>4 && NF>=4 {for(i=1;i<=NF-3;i++) printf "%s%s", $i, (i<NF-3?" ":""); print ""}' | head -20)
+
+    if [ -z "$NETWORKS" ]; then
+        error "No WiFi networks found"
+        exit 1
+    fi
+
+    # Create menu items for dialog
+    MENU_ITEMS=()
+    i=1
+    while IFS= read -r network; do
+        if [ -n "$network" ]; then
+            MENU_ITEMS+=("$i" "$network")
+            i=$((i + 1))
+        fi
+    done <<< "$NETWORKS"
+
+    if [ ${#MENU_ITEMS[@]} -eq 0 ]; then
+        error "No valid networks found"
+        exit 1
+    fi
+
+    # Show network selection menu
+    SELECTION=$(menu_dialog "WiFi Networks" "Select a WiFi network:" "${MENU_ITEMS[@]}")
+
+    if [ -z "$SELECTION" ]; then
+        error "No network selected"
+        exit 1
+    fi
+
+    # Validate selection is a number
+    if ! [[ "$SELECTION" =~ ^[0-9]+$ ]]; then
+        error "Invalid network selection: '$SELECTION'"
+        exit 1
+    fi
+
+    # Get selected network name
+    SELECTED_NETWORK=$(echo "$NETWORKS" | sed -n "${SELECTION}p" 2>/dev/null | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+
+    if [ -z "$SELECTED_NETWORK" ]; then
+        error "Invalid network selection: selection $SELECTION out of range"
+        exit 1
+    fi
+
+    log "Selected network: $SELECTED_NETWORK"
+
+    # Get password
+    WIFI_PASSWORD=$(password_dialog "Enter password for '$SELECTED_NETWORK'")
+
+    if [ -z "$WIFI_PASSWORD" ]; then
+        # Try connecting without password (open network)
+        log "Attempting to connect to open network..."
+        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK"
+    else
+        # Connect with password
+        log "Connecting to WiFi network..."
+        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK" --passphrase "$WIFI_PASSWORD"
+    fi
+
+    # Wait a moment and check connection
+    sleep 5
+
+    if check_internet; then
+        success "Successfully connected to WiFi"
+    else
+        error "Failed to connect to WiFi. Please check password and try again."
+        exit 1
+    fi
+}
+
+# Disk selection function
+select_disk() {
+    log "Scanning available disks..."
+
+    # Get list of disks (excluding loop devices, ram, etc.)
+    DISKS=$(lsblk -dno NAME,SIZE,MODEL | grep -E '^(sd|nvme|vd|hd)' | head -10)
+
+    if [ -z "$DISKS" ]; then
+        error "No suitable disks found"
+        exit 1
+    fi
+
+    # Create menu items
+    MENU_ITEMS=()
+    while IFS= read -r disk_line; do
+        if [ -n "$disk_line" ]; then
+            DISK_NAME=$(echo "$disk_line" | awk '{print $1}')
+            DISK_INFO="$disk_line"
+            MENU_ITEMS+=("$DISK_NAME" "$DISK_INFO")
+        fi
+    done <<< "$DISKS"
+
+    # Show disk selection menu
+    SELECTED_DISK=$(menu_dialog "Disk Selection" "⚠️  WARNING: Selected disk will be COMPLETELY ERASED!
+
+Select installation disk:" "${MENU_ITEMS[@]}")
+
+    if [ -z "$SELECTED_DISK" ]; then
+        error "No disk selected"
+        exit 1
+    fi
+
+    # Confirm selection
+    DISK_INFO=$(echo "$DISKS" | grep "^$SELECTED_DISK")
+
+    if ! show_dialog --yesno "⚠️  FINAL WARNING ⚠️
+
+You selected: $DISK_INFO
+
+This disk will be COMPLETELY ERASED and partitioned for ArchRiot installation.
+
+Are you absolutely sure you want to continue?" 12 70; then
+        log "Disk selection cancelled by user"
+        exit 0
+    fi
+
+    SELECTED_DISK="/dev/$SELECTED_DISK"
+    success "Selected disk: $SELECTED_DISK"
+}
+
+# User setup function
+setup_user() {
+    log "Setting up user account..."
+
+    # Get hostname
+    HOSTNAME=$(input_dialog "Enter hostname for this computer")
+    while [ -z "$HOSTNAME" ] || [[ ! "$HOSTNAME" =~ ^[a-zA-Z0-9-]+$ ]]; do
+        HOSTNAME=$(input_dialog "Invalid hostname. Enter hostname (letters, numbers, hyphens only)")
+    done
+
+    # Get username
+    USERNAME=$(input_dialog "Enter username")
+    while [ -z "$USERNAME" ] || [[ ! "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; do
+        USERNAME=$(input_dialog "Invalid username. Enter username (lowercase, start with letter)")
+    done
+
+    # Get user password
+    PASSWORD=$(password_dialog "Enter password for user '$USERNAME'")
+    while [ -z "$PASSWORD" ] || [ ${#PASSWORD} -lt 6 ]; do
+        PASSWORD=$(password_dialog "Password too short. Enter password (minimum 6 characters)")
+    done
+
+    # Confirm user password
+    PASSWORD_CONFIRM=$(password_dialog "Confirm user password")
+    while [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; do
+        warn "Passwords do not match"
+        PASSWORD=$(password_dialog "Enter password for user '$USERNAME'")
+        PASSWORD_CONFIRM=$(password_dialog "Confirm user password")
+    done
+
+    # Get root password
+    ROOT_PASSWORD=$(password_dialog "Enter root password")
+    while [ -z "$ROOT_PASSWORD" ] || [ ${#ROOT_PASSWORD} -lt 6 ]; do
+        ROOT_PASSWORD=$(password_dialog "Root password too short. Enter password (minimum 6 characters)")
+    done
+
+    # Confirm root password
+    ROOT_PASSWORD_CONFIRM=$(password_dialog "Confirm root password")
+    while [ "$ROOT_PASSWORD" != "$ROOT_PASSWORD_CONFIRM" ]; do
+        warn "Root passwords do not match"
+        ROOT_PASSWORD=$(password_dialog "Enter root password")
+        ROOT_PASSWORD_CONFIRM=$(password_dialog "Confirm root password")
+    done
+
+    # Get LUKS encryption password
+    LUKS_PASSWORD=$(password_dialog "Enter disk encryption (LUKS) password")
+    while [ -z "$LUKS_PASSWORD" ] || [ ${#LUKS_PASSWORD} -lt 8 ]; do
+        LUKS_PASSWORD=$(password_dialog "Encryption password too short. Enter password (minimum 8 characters)")
+    done
+
+    # Confirm LUKS password
+    LUKS_PASSWORD_CONFIRM=$(password_dialog "Confirm disk encryption password")
+    while [ "$LUKS_PASSWORD" != "$LUKS_PASSWORD_CONFIRM" ]; do
+        warn "Encryption passwords do not match"
+        LUKS_PASSWORD=$(password_dialog "Enter disk encryption (LUKS) password")
+        LUKS_PASSWORD_CONFIRM=$(password_dialog "Confirm disk encryption password")
+    done
+
+    success "User configuration complete"
+    log "Hostname: $HOSTNAME"
+    log "Username: $USERNAME"
+}
+
+# Create archinstall configuration
+create_archinstall_config() {
+    log "Creating archinstall configuration..."
+
+    cat > "$ARCHINSTALL_CONFIG" << EOF
+{
+    "disk_config": {
+        "config_type": "default_layout",
+        "device_modifications": [
+            {
+                "device": "$SELECTED_DISK",
+                "partitions": [
+                    {
+                        "type": "primary",
+                        "start": "1MiB",
+                        "size": "512MiB",
+                        "boot": true,
+                        "esp": true,
+                        "filesystem": {
+                            "type": "fat32"
+                        }
+                    },
+                    {
+                        "type": "primary",
+                        "start": "513MiB",
+                        "size": "100%",
+                        "encrypted": true,
+                        "password": "$LUKS_PASSWORD",
+                        "filesystem": {
+                            "type": "btrfs"
+                        }
+                    }
+                ]
+            }
+        ]
+    },
+    "users": [
+        {
+            "username": "$USERNAME",
+            "!password": "$PASSWORD",
+            "sudo": true
+        }
+    ],
+    "!root-password": "$ROOT_PASSWORD",
+    "audio_config": {
+        "audio": "pipewire"
+    },
+    "kernels": ["linux"],
+    "locale_config": {
+        "sys_lang": "en_US.UTF-8",
+        "sys_enc": "UTF-8",
+        "keyboard": "$SELECTED_KEYBOARD"
+    },
+    "mirror_config": {
+        "custom_mirrors": [],
+        "mirror_regions": {
+            "United States": ["https://geo.mirror.pkgbuild.com/"]
+        }
+    },
+    "nic": {
+        "type": "nm"
+    },
+    "ntp": true,
+    "packages": [
+        "wget", "curl", "git", "base-devel", "networkmanager", "dialog", "iw", "iwd",
+        "sudo", "nano", "vim", "openssh", "rsync", "unzip", "zip", "htop",
+        "pipewire", "pipewire-alsa", "pipewire-pulse", "pipewire-jack",
+        "intel-ucode", "amd-ucode", "dosfstools", "e2fsprogs", "btrfs-progs",
+        "firefox", "python", "python-pip", "neovim"
+    ],
+    "profile_config": null,
+    "silent": false,
+    "timezone": "$SELECTED_TIMEZONE"
+}
+EOF
+
+    success "Configuration file created: $ARCHINSTALL_CONFIG"
+}
+
+# Run archinstall
+run_archinstall() {
+    log "Starting automated Arch Linux installation..."
+
+    show_dialog --msgbox "Starting Installation
+
+The automated installation will now begin.
+This process may take 10-30 minutes depending on your internet speed.
+
+The installer will:
+• Partition and encrypt $SELECTED_DISK
+• Install base Arch Linux system
+• Configure bootloader and user account
+• Set up networking and audio
+
+Please be patient..." 14 70
+
+    # Run archinstall with our configuration
+    if archinstall --config "$ARCHINSTALL_CONFIG" --silent; then
+        success "Arch Linux installation completed successfully"
+    else
+        error "Arch Linux installation failed"
+        exit 1
+    fi
+}
+
+# Install ArchRiot in the new system
+install_archriot() {
+    log "Installing ArchRiot desktop environment..."
+
+    show_dialog --msgbox "Installing ArchRiot
+
+Now installing the ArchRiot desktop environment in your new system.
+This will download and install:
+• Hyprland compositor
+• ArchRiot configurations and themes
+• Essential applications
+• Development tools
+
+This may take 15-30 minutes..." 12 70
+
+    # Transfer WiFi credentials to new system (if any exist)
+    transfer_wifi_credentials
+
+    # chroot into the new system and run ArchRiot setup
+    arch-chroot /mnt /bin/bash << 'CHROOT_EOF'
+# Ensure network is available in chroot
+systemctl enable NetworkManager
+systemctl start NetworkManager
+
+# Wait a moment for network
+sleep 5
+
+# Download and run ArchRiot setup
+echo "Downloading ArchRiot setup script..."
+if curl -fsSL https://ArchRiot.org/setup.sh | bash; then
+    echo "ArchRiot installation completed successfully"
+else
+    echo "ArchRiot installation failed, but base system is installed"
+    exit 1
+fi
+CHROOT_EOF
+
+    if [ $? -eq 0 ]; then
+        success "ArchRiot installation completed successfully"
+    else
+        warn "ArchRiot installation encountered issues, but base system is installed"
+    fi
+}
+
+# Transfer WiFi credentials to new system
+transfer_wifi_credentials() {
+    log "Transferring WiFi credentials to new system..."
+
+    # Check if NetworkManager connections exist
+    if [ -d "/etc/NetworkManager/system-connections" ]; then
+        # Create target directory
+        mkdir -p /mnt/etc/NetworkManager/system-connections
+
+        # Copy connection files
+        if ls /etc/NetworkManager/system-connections/* >/dev/null 2>&1; then
+            cp /etc/NetworkManager/system-connections/* /mnt/etc/NetworkManager/system-connections/ 2>/dev/null || true
+            chmod 600 /mnt/etc/NetworkManager/system-connections/* 2>/dev/null || true
+            success "WiFi credentials transferred to new system"
+        else
+            log "No WiFi connections to transfer"
+        fi
+    else
+        log "No NetworkManager connections found"
+    fi
+}
+
+# Select timezone
+select_timezone() {
+    log "Setting up timezone..."
+
+    # Get list of all timezones
+    local timezones=($(timedatectl list-timezones))
+    local menu_items=()
+
+    # Create menu items for common timezones first
+    local common_zones=(
+        "America/New_York" "US Eastern"
+        "America/Chicago" "US Central"
+        "America/Denver" "US Mountain"
+        "America/Los_Angeles" "US Pacific"
+        "America/Phoenix" "US Arizona"
+        "Europe/London" "UK"
+        "Europe/Paris" "France/Germany"
+        "Europe/Rome" "Italy"
+        "Asia/Tokyo" "Japan"
+        "Asia/Shanghai" "China"
+        "Australia/Sydney" "Australia East"
+        "UTC" "UTC/GMT"
+    )
+
+    # Add common zones
+    for ((i=0; i<${#common_zones[@]}; i+=2)); do
+        menu_items+=("${common_zones[i]}" "${common_zones[i+1]}")
+    done
+
+    # Add separator
+    menu_items+=("---" "--- Other Timezones ---")
+
+    # Add all other timezones
+    for tz in "${timezones[@]}"; do
+        # Skip if already in common list
+        local is_common=false
+        for ((i=0; i<${#common_zones[@]}; i+=2)); do
+            if [[ "${common_zones[i]}" == "$tz" ]]; then
+                is_common=true
+                break
+            fi
+        done
+
+        if [[ "$is_common" == false ]]; then
+            menu_items+=("$tz" "$tz")
+        fi
+    done
+
+    SELECTED_TIMEZONE=$(menu_dialog "Timezone Selection" "Select your timezone:" "${menu_items[@]}")
+
+    if [[ -z "$SELECTED_TIMEZONE" || "$SELECTED_TIMEZONE" == "---" ]]; then
+        error "No timezone selected"
+        exit 1
+    fi
+
+    success "Timezone selected: $SELECTED_TIMEZONE"
+}
+
+# Select keyboard layout
+select_keyboard() {
+    log "Setting up keyboard layout..."
+
+    # Common keyboard layouts
+    local keyboards=(
+        "us" "US English"
+        "uk" "UK English"
+        "de" "German"
+        "fr" "French"
+        "es" "Spanish"
+        "it" "Italian"
+        "pt" "Portuguese"
+        "ru" "Russian"
+        "jp" "Japanese"
+        "kr" "Korean"
+        "cn" "Chinese"
+        "dvorak" "Dvorak"
+        "colemak" "Colemak"
+    )
+
+    SELECTED_KEYBOARD=$(menu_dialog "Keyboard Layout" "Select your keyboard layout:" "${keyboards[@]}")
+
+    if [[ -z "$SELECTED_KEYBOARD" ]]; then
+        error "No keyboard layout selected"
+        exit 1
+    fi
+
+    # Apply keyboard layout immediately
+    loadkeys "$SELECTED_KEYBOARD" 2>/dev/null || true
+
+    success "Keyboard layout selected: $SELECTED_KEYBOARD"
+}
+
+# Main installation flow
+main() {
+    # Clear screen and show welcome
+    clear
+    show_welcome
+
+    # Setup network if needed
+    setup_wifi
+
+    # Select timezone
+    select_timezone
+
+    # Select keyboard layout
+    select_keyboard
+
+    # Select installation disk
+    select_disk
+
+    # Get user information
+    setup_user
+
+    # Create archinstall configuration
+    create_archinstall_config
+
+    # Final confirmation
+    if ! show_dialog --yesno "Ready to Install
+
+Configuration Summary:
+• Disk: $SELECTED_DISK (will be encrypted with LUKS)
+• Hostname: $HOSTNAME
+• Username: $USERNAME (with sudo access)
+• Root account: enabled with password
+• Encryption: LUKS with your chosen password
+• Timezone: $SELECTED_TIMEZONE
+• Keyboard: $SELECTED_KEYBOARD
+• Filesystem: BTRFS with compression
+• Bootloader: systemd-boot
+• Audio: PipeWire
+• Desktop: ArchRiot (Hyprland)
+
+Proceed with installation?" 18 60; then
+        log "Installation cancelled by user"
+        exit 0
+    fi
+
+    # Run the installation
+    run_archinstall
+
+    # Install ArchRiot
+    install_archriot
+
+    # Installation complete
+    show_dialog --msgbox "🎉 Installation Complete!
+
+ArchRiot has been successfully installed on your system.
+
+The system will now reboot. After reboot:
+• Enter your disk encryption password
+• Log in with your user account
+• Enjoy your new ArchRiot system!
+
+Note: The first boot may take a few extra moments to initialize services." 14 70
+
+    success "ArchRiot installation completed successfully!"
+    log "System will reboot in 10 seconds..."
+
+    # Clean up
+    rm -f "$ARCHINSTALL_CONFIG" /tmp/input_result /tmp/password_result /tmp/menu_result
+
+    # Reboot
+    sleep 10
+    reboot
+}
+
+# Handle Ctrl+C gracefully
+trap 'echo -e "\n${YELLOW}Installation interrupted by user${NC}"; exit 1' INT
+
+# Run main function
+main "$@"

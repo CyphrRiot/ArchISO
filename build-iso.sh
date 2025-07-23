@@ -18,7 +18,8 @@ echo -e "${BLUE}=================================${NC}"
 # Configuration
 OFFICIAL_ISO_URL="https://mirror.rackspace.com/archlinux/iso/latest/archlinux-x86_64.iso"
 OFFICIAL_ISO="isos/archlinux.iso"
-EXTRACT_DIR="iso_extract"
+BUILD_DIR="build"
+EXTRACT_DIR="$BUILD_DIR/iso_extract"
 OUTPUT_ISO="isos/archriot-2025.iso"
 
 # Cleanup function
@@ -27,13 +28,13 @@ cleanup() {
     # Unmount any potential mount points
     sudo umount /mnt 2>/dev/null || true
     sudo umount "$EXTRACT_DIR" 2>/dev/null || true
-    sudo umount efi_mnt 2>/dev/null || true
+    sudo umount "$BUILD_DIR/efi_mnt" 2>/dev/null || true
     # Only clean up on successful completion or explicit request
     if [[ "$CLEANUP_ON_EXIT" == "true" ]]; then
-        sudo rm -rf "$EXTRACT_DIR" work_dir efi_mnt
-        rm -f efiboot.img
+        sudo rm -rf "$EXTRACT_DIR" "$BUILD_DIR/work_dir" "$BUILD_DIR/efi_mnt"
+        rm -f "$BUILD_DIR/efiboot.img"
     else
-        echo -e "${BLUE}💡 Keeping $EXTRACT_DIR for debugging/resuming${NC}"
+        echo -e "${BLUE}💡 Keeping $BUILD_DIR for debugging/resuming${NC}"
     fi
 }
 trap cleanup EXIT
@@ -124,21 +125,12 @@ copy_to_ventoy() {
 cache_packages() {
     echo -e "${BLUE}🗄️  Checking package cache...${NC}"
 
-    # Ask user if they want to cache packages (can be time consuming)
-    echo -e "${YELLOW}⚠️  Package caching can take 10-15 minutes for 71 packages${NC}"
-    read -p "Cache packages for offline installation? [Y/n]: " -r
-    echo
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        echo -e "${BLUE}⏭️  Skipping package caching${NC}"
-        return 0
-    fi
-
-    # Create cache directory if it doesn't exist
-    mkdir -p package_cache
+    # Create build and cache directories if they don't exist
+    mkdir -p "$BUILD_DIR/package_cache"
 
     # Fix permissions for package cache
-    sudo chown root:root package_cache 2>/dev/null || true
-    sudo chmod 755 package_cache 2>/dev/null || true
+    sudo chown root:root "$BUILD_DIR/package_cache" 2>/dev/null || true
+    sudo chmod 755 "$BUILD_DIR/package_cache" 2>/dev/null || true
 
     # Check if we have the package list
     if [[ ! -f "configs/packages.x86_64" ]]; then
@@ -146,19 +138,53 @@ cache_packages() {
         return 1
     fi
 
-    # Read packages from config (excluding comments and empty lines)
+    # Get package list and check what's already cached
     local packages=($(grep -v '^#' configs/packages.x86_64 | grep -v '^$' | tr '\n' ' '))
     local total_packages=${#packages[@]}
-    local cached_packages=0
+    local cached_count=0
+    local missing_packages=()
+
+    echo -e "${BLUE}📋 Checking cache status for $total_packages packages...${NC}"
+
+    # Check which packages are already cached
+    for package in "${packages[@]}"; do
+        local cached_file=$(find "$BUILD_DIR/package_cache" -name "${package}-*.pkg.tar.*" 2>/dev/null | head -1)
+        if [[ -n "$cached_file" ]]; then
+            ((cached_count++))
+        else
+            missing_packages+=("$package")
+        fi
+    done
+
+    echo -e "${GREEN}✅ Already cached: $cached_count packages${NC}"
+    echo -e "${BLUE}📥 Missing: ${#missing_packages[@]} packages${NC}"
+
+    # If all packages are cached, skip download prompt
+    if [[ ${#missing_packages[@]} -eq 0 ]]; then
+        echo -e "${GREEN}🎉 All packages already cached! Using existing cache.${NC}"
+        return 0
+    fi
+
+    # Ask user if they want to download missing packages
+    echo -e "${YELLOW}⚠️  Downloading ${#missing_packages[@]} missing packages can take 5-15 minutes${NC}"
+    read -p "Download missing packages? [Y/n]: " -r
+    echo
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        echo -e "${BLUE}⏭️  Skipping package downloads - using existing cache only${NC}"
+        return 0
+    fi
+
+    # Download missing packages
     local downloaded_packages=0
     local current_package=0
+    local total_missing=${#missing_packages[@]}
 
-    echo -e "${BLUE}📋 Found $total_packages packages to cache${NC}"
+    echo -e "${BLUE}📥 Downloading $total_missing missing packages...${NC}"
 
-    # Check which packages are already cached and up-to-date
-    for package in "${packages[@]}"; do
+    # Process only missing packages
+    for package in "${missing_packages[@]}"; do
         ((current_package++))
-        echo -e "${BLUE}[$current_package/$total_packages] Processing: $package${NC}"
+        echo -e "${BLUE}[$current_package/$total_missing] Processing: $package${NC}"
 
         # Check if package exists in official repos first
         # Get latest package info from repos
@@ -181,71 +207,66 @@ cache_packages() {
         fi
 
         # Check if we have this package cached
-        local cached_file=$(find package_cache -name "${package}-${latest_version}-*.pkg.tar.*" 2>/dev/null | head -1)
+        local cached_file=$(find "$BUILD_DIR/package_cache" -name "${package}-${latest_version}-*.pkg.tar.*" 2>/dev/null | head -1)
 
         # Also check for any version of the package (in case version changed)
         if [[ -z "$cached_file" ]]; then
-            cached_file=$(find package_cache -name "${package}-*.pkg.tar.*" 2>/dev/null | head -1)
+            cached_file=$(find "$BUILD_DIR/package_cache" -name "${package}-*.pkg.tar.*" 2>/dev/null | head -1)
         fi
 
-        if [[ -n "$cached_file" ]]; then
-            echo -e "${GREEN}✅ Cached: $package-$latest_version${NC}"
-            ((cached_packages++))
-        else
-            echo -e "${BLUE}📥 Downloading: $package-$latest_version${NC}"
+        echo -e "${BLUE}📥 Downloading: $package-$latest_version${NC}"
 
-            local download_success=false
-            local search_paths=("/var/cache/pacman/pkg" "$HOME/.cache/yay")
+        local download_success=false
+        local search_paths=("/var/cache/pacman/pkg" "$HOME/.cache/yay")
 
-            if [[ "$is_aur_package" == "true" ]]; then
-                # For AUR packages, build with yay (stores in ~/.cache/yay/)
-                if yay -S --noconfirm --needed --downloadonly "$package" >/dev/null 2>&1; then
-                    download_success=true
-                fi
-            else
-                # For official repo packages, use pacman
-                if sudo pacman -Sw --noconfirm "$package" >/dev/null 2>&1; then
-                    download_success=true
-                fi
+        if [[ "$is_aur_package" == "true" ]]; then
+            # For AUR packages, build with yay (stores in ~/.cache/yay/)
+            if yay -S --noconfirm --needed --downloadonly "$package" >/dev/null 2>&1; then
+                download_success=true
             fi
+        else
+            # For official repo packages, use pacman
+            if sudo pacman -Sw --noconfirm "$package" >/dev/null 2>&1; then
+                download_success=true
+            fi
+        fi
 
-            if [[ "$download_success" == "true" ]]; then
-                # Find the downloaded package and copy it to our cache
-                local downloaded_files=()
-                for search_path in "${search_paths[@]}"; do
-                    if [[ -d "$search_path" ]]; then
-                        while IFS= read -r -d '' file; do
-                            downloaded_files+=("$file")
-                        done < <(find "$search_path" -name "${package}-*.pkg.tar.*" -type f ! -name "*.sig" -print0 2>/dev/null)
+        if [[ "$download_success" == "true" ]]; then
+            # Find the downloaded package and copy it to our cache
+            local downloaded_files=()
+            for search_path in "${search_paths[@]}"; do
+                if [[ -d "$search_path" ]]; then
+                    while IFS= read -r -d '' file; do
+                        downloaded_files+=("$file")
+                    done < <(find "$search_path" -name "${package}-*.pkg.tar.*" -type f ! -name "*.sig" -print0 2>/dev/null)
+                fi
+            done
+
+            if [[ ${#downloaded_files[@]} -gt 0 ]]; then
+                # Copy the most recent file
+                for file in "${downloaded_files[@]}"; do
+                    if [[ ! -f "$BUILD_DIR/package_cache/$(basename "$file")" ]]; then
+                        sudo cp "$file" "$BUILD_DIR/package_cache/" 2>/dev/null || true
+                        sudo cp "$file.sig" "$BUILD_DIR/package_cache/" 2>/dev/null || true
                     fi
                 done
-
-                if [[ ${#downloaded_files[@]} -gt 0 ]]; then
-                    # Copy the package and its signature
-                    for file in "${downloaded_files[@]}"; do
-                        if [[ ! -f "package_cache/$(basename "$file")" ]]; then
-                            sudo cp "$file" package_cache/ 2>/dev/null || true
-                            sudo cp "$file.sig" package_cache/ 2>/dev/null || true
-                        fi
-                    done
-                    echo -e "${GREEN}✅ Downloaded: $package${NC}"
-                    ((downloaded_packages++))
-                else
-                    echo -e "${YELLOW}⚠️  Downloaded but couldn't find package files: $package${NC}"
-                fi
+                echo -e "${GREEN}✅ Downloaded: $package-$latest_version${NC}"
+                ((downloaded_packages++))
             else
-                echo -e "${YELLOW}⚠️  Failed to download: $package${NC}"
+                echo -e "${RED}❌ Failed to find: $package-$latest_version${NC}"
             fi
+        else
+            echo -e "${RED}❌ Failed to download: $package-$latest_version${NC}"
         fi
     done
 
     echo -e "${GREEN}📊 Cache Summary:${NC}"
-    echo -e "${GREEN}   Cached packages: $cached_packages${NC}"
-    echo -e "${GREEN}   Downloaded packages: $downloaded_packages${NC}"
-    echo -e "${GREEN}   Total packages: $((cached_packages + downloaded_packages))${NC}"
+    echo -e "${GREEN}   Previously cached: $cached_count${NC}"
+    echo -e "${GREEN}   Newly downloaded: $downloaded_packages${NC}"
+    echo -e "${GREEN}   Total packages: $((cached_count + downloaded_packages))${NC}"
 
     # Get cache size
-    local cache_size=$(du -sh package_cache 2>/dev/null | cut -f1)
+    local cache_size=$(du -sh "$BUILD_DIR/package_cache" 2>/dev/null | cut -f1)
     echo -e "${GREEN}💾 Cache size: $cache_size${NC}"
 }
 
@@ -272,15 +293,8 @@ sudo chown -R "$USER:$USER" "$EXTRACT_DIR"
 chmod -R u+w "$EXTRACT_DIR"
 echo -e "${GREEN}✅ ISO extracted to $EXTRACT_DIR${NC}"
 
-# Step 2.5: Fix boot configuration to use archisolabel instead of hardcoded UUID
-echo -e "${BLUE}🔧 Fixing boot configuration for device detection...${NC}"
-if [[ -f "$EXTRACT_DIR/boot/syslinux/archiso_sys-linux.cfg" ]]; then
-    # Replace hardcoded archisosearchuuid with archisolabel for dynamic detection
-    sed -i 's/archisosearchuuid=[^ ]*/archisolabel=ARCH_202507/' "$EXTRACT_DIR/boot/syslinux/archiso_sys-linux.cfg"
-    echo -e "${GREEN}✅ Boot configuration updated for dynamic device detection${NC}"
-else
-    echo -e "${YELLOW}⚠️  Boot configuration file not found${NC}"
-fi
+# Step 2.5: Skip boot config update for now - will do post-creation
+echo -e "${BLUE}🔧 Boot configuration will be updated after ISO creation...${NC}"
 
 # Prepare EFI boot files (use existing structure from original ISO)
 echo -e "${BLUE}🛠️ Preparing EFI boot structure...${NC}"
@@ -292,11 +306,8 @@ else
     exit 1
 fi
 
-# Step 3: Add our ArchRiot installer
-echo -e "${BLUE}⚙️  Adding ArchRiot installer...${NC}"
-
-# Create installer directory in airootfs
-mkdir -p "$EXTRACT_DIR/airootfs/usr/local/bin"
+# Step 3: Add ArchRiot installer and packages to squashfs filesystem
+echo -e "${BLUE}⚙️  Modifying squashfs filesystem...${NC}"
 
 # Verify installer files exist
 if [[ ! -f "airootfs/usr/local/bin/archriot-installer" ]]; then
@@ -304,22 +315,33 @@ if [[ ! -f "airootfs/usr/local/bin/archriot-installer" ]]; then
     exit 1
 fi
 
-if [[ ! -f "airootfs/etc/systemd/system/archriot-installer.service" ]]; then
-    echo -e "${RED}❌ Service file not found: airootfs/etc/systemd/system/archriot-installer.service${NC}"
+# Extract squashfs filesystem
+echo -e "${BLUE}📂 Extracting squashfs filesystem...${NC}"
+SQUASHFS_FILE="$EXTRACT_DIR/arch/x86_64/airootfs.sfs"
+AIROOTFS_DIR="$EXTRACT_DIR/airootfs_extracted"
+
+if [[ ! -f "$SQUASHFS_FILE" ]]; then
+    echo -e "${RED}❌ Squashfs file not found: $SQUASHFS_FILE${NC}"
     exit 1
 fi
 
-# Copy our installer script
-cp airootfs/usr/local/bin/archriot-installer "$EXTRACT_DIR/airootfs/usr/local/bin/"
-chmod +x "$EXTRACT_DIR/airootfs/usr/local/bin/archriot-installer"
+# Extract the squashfs filesystem
+sudo unsquashfs -f -d "$AIROOTFS_DIR" -processors 4 "$SQUASHFS_FILE"
+echo -e "${GREEN}✅ Squashfs filesystem extracted${NC}"
 
-# Create systemd service
-mkdir -p "$EXTRACT_DIR/airootfs/etc/systemd/system"
-cp airootfs/etc/systemd/system/archriot-installer.service "$EXTRACT_DIR/airootfs/etc/systemd/system/"
+# Make the extracted filesystem writable
+sudo chown -R "$USER:$USER" "$AIROOTFS_DIR"
+chmod -R u+w "$AIROOTFS_DIR"
 
-# Replace getty@tty1 to directly launch installer (seamless experience)
-mkdir -p "$EXTRACT_DIR/airootfs/etc/systemd/system"
-cat > "$EXTRACT_DIR/airootfs/etc/systemd/system/getty@tty1.service" << 'EOF'
+# Add our installer script
+echo -e "${BLUE}📝 Adding ArchRiot installer...${NC}"
+mkdir -p "$AIROOTFS_DIR/usr/local/bin"
+cp airootfs/usr/local/bin/archriot-installer "$AIROOTFS_DIR/usr/local/bin/"
+chmod +x "$AIROOTFS_DIR/usr/local/bin/archriot-installer"
+
+# Replace getty@tty1 to directly launch installer
+mkdir -p "$AIROOTFS_DIR/etc/systemd/system"
+cat > "$AIROOTFS_DIR/etc/systemd/system/getty@tty1.service" << 'EOF'
 [Unit]
 Description=ArchRiot Installer on %I
 Documentation=man:agetty(8) man:systemd-getty-generator(8)
@@ -353,17 +375,61 @@ Environment=TERM=linux
 WantedBy=getty.target
 EOF
 
-# Disable the original archriot-installer.service since we're replacing getty directly
-# Remove the service file we copied earlier
-rm -f "$EXTRACT_DIR/airootfs/etc/systemd/system/archriot-installer.service"
+# Enable the service by creating symlink
+mkdir -p "$AIROOTFS_DIR/etc/systemd/system/getty.target.wants"
+ln -sf "/etc/systemd/system/getty@tty1.service" "$AIROOTFS_DIR/etc/systemd/system/getty.target.wants/getty@tty1.service"
 
-echo -e "${GREEN}✅ ArchRiot installer added${NC}"
+# Add package cache if available
+if [[ -d "$BUILD_DIR/package_cache" && -n "$(ls -A "$BUILD_DIR/package_cache" 2>/dev/null)" ]]; then
+    echo -e "${BLUE}📦 Adding package cache to filesystem...${NC}"
+    mkdir -p "$AIROOTFS_DIR/var/cache/pacman/pkg"
+    sudo cp "$BUILD_DIR/package_cache"/*.pkg.tar.* "$AIROOTFS_DIR/var/cache/pacman/pkg/" 2>/dev/null || true
 
-# Step 4: Smart package caching
-echo -e "${BLUE}📦 Setting up package cache for offline installation...${NC}"
+    pkg_count=$(ls "$AIROOTFS_DIR/var/cache/pacman/pkg"/*.pkg.tar.* 2>/dev/null | wc -l)
+    echo -e "${GREEN}✅ Added $pkg_count packages to filesystem cache${NC}"
 
-# Create package cache directory in extracted ISO
-mkdir -p "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"
+    # Extract dialog package for TUI functionality
+    echo -e "${BLUE}🔧 Extracting dialog package for live environment...${NC}"
+
+    # Find dialog package in cache
+    dialog_pkg=$(ls "$AIROOTFS_DIR/var/cache/pacman/pkg/dialog"-*.pkg.tar.* 2>/dev/null | head -1)
+    if [[ -n "$dialog_pkg" ]]; then
+        echo -e "${BLUE}📦 Extracting dialog from $(basename "$dialog_pkg")...${NC}"
+        # Calculate relative path before changing directories
+        dialog_rel_path=$(realpath --relative-to="$AIROOTFS_DIR" "$dialog_pkg")
+        cd "$AIROOTFS_DIR"
+        sudo bsdtar -xf "$dialog_rel_path" --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.BUILDINFO' --exclude='.INSTALL'
+        if [[ -f "usr/bin/dialog" ]]; then
+            echo -e "${GREEN}✅ Dialog extracted successfully${NC}"
+        else
+            echo -e "${RED}❌ Dialog extraction failed - binary not found${NC}"
+        fi
+        cd - >/dev/null
+    else
+        echo -e "${YELLOW}⚠️  Dialog package not found in cache${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️  No package cache to add${NC}"
+fi
+
+# Repack the squashfs filesystem
+echo -e "${BLUE}📦 Repacking squashfs filesystem...${NC}"
+sudo mksquashfs "$AIROOTFS_DIR" "$SQUASHFS_FILE.new" -comp xz -b 1M -Xdict-size 100% -noappend -processors 4
+sudo mv "$SQUASHFS_FILE.new" "$SQUASHFS_FILE"
+
+# Update checksums
+echo -e "${BLUE}🔍 Updating checksums...${NC}"
+cd "$EXTRACT_DIR/arch/x86_64"
+sha512sum airootfs.sfs > airootfs.sha512
+cd - >/dev/null
+
+# Clean up extracted filesystem
+sudo rm -rf "$AIROOTFS_DIR"
+
+echo -e "${GREEN}✅ ArchRiot installer and packages integrated into squashfs${NC}"
+
+# Step 4: Package caching (already handled above)
+echo -e "${BLUE}📦 Package caching integrated with squashfs modification${NC}"
 
 # Cache packages intelligently (downloads only new/updated packages)
 set +e  # Temporarily disable exit on error for package caching
@@ -372,8 +438,8 @@ set -e  # Re-enable exit on error
 
 # Copy cached packages to ISO
 echo -e "${BLUE}📋 Copying cached packages to ISO...${NC}"
-if [[ -d "package_cache" && -n "$(ls -A package_cache 2>/dev/null)" ]]; then
-    sudo cp package_cache/*.pkg.tar.* "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg/" 2>/dev/null || true
+if [[ -d "$BUILD_DIR/package_cache" && -n "$(ls -A "$BUILD_DIR/package_cache" 2>/dev/null)" ]]; then
+    sudo cp "$BUILD_DIR/package_cache"/*.pkg.tar.* "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg/" 2>/dev/null || true
 
     # Count packages copied
     pkg_count=$(ls "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"/*.pkg.tar.* 2>/dev/null | wc -l)
@@ -415,13 +481,12 @@ if command -v xorriso &>/dev/null; then
             -no-emul-boot \
             -boot-load-size 4 \
             -boot-info-table \
-            -isohybrid-mbr "$EXTRACT_DIR/boot/syslinux/isohdpfx.bin" \
             -eltorito-alt-boot \
             -e "$EFI_BOOT_FILE" \
             -no-emul-boot \
             -isohybrid-gpt-basdat \
             -output "$OUTPUT_ISO" \
-            "$EXTRACT_DIR/" && {
+            "$EXTRACT_DIR/" || {
             echo -e "${GREEN}✅ ISO created with UEFI+BIOS support${NC}"
         } || {
             echo -e "${YELLOW}⚠️  UEFI ISO creation failed, trying BIOS-only...${NC}"
@@ -483,14 +548,148 @@ echo -e "${GREEN}📏 Final ISO size: $ISO_SIZE${NC}"
 
 echo -e "${GREEN}🎉 ArchRiot ISO modification complete!${NC}"
 echo -e "${GREEN}📀 Output: $OUTPUT_ISO${NC}"
-echo -e "${YELLOW}💡 This ISO now includes ArchRiot installer and cached packages${NC}"
+echo -e "${GREEN}💡 This ISO now includes ArchRiot installer and cached packages${NC}"
+
+# Step 6: Fix UUID mismatch - update boot configs with actual ISO UUID
+echo -e "${BLUE}🔧 Fixing UUID mismatch in boot configurations...${NC}"
+
+# Extract actual UUID from created ISO
+ACTUAL_UUID=$(blkid "$OUTPUT_ISO" | grep -o 'UUID="[^"]*"' | cut -d'"' -f2)
+
+if [[ -n "$ACTUAL_UUID" ]]; then
+    echo -e "${BLUE}📋 Actual ISO UUID: $ACTUAL_UUID${NC}"
+
+    # Re-extract ISO to update boot configs
+    TEMP_EXTRACT="$BUILD_DIR/temp_uuid_fix"
+    mkdir -p "$TEMP_EXTRACT"
+    sudo mount -o loop "$OUTPUT_ISO" /mnt
+    sudo cp -r /mnt/* "$TEMP_EXTRACT/"
+    sudo umount /mnt
+
+    # Make writable
+    sudo chown -R "$USER:$USER" "$TEMP_EXTRACT"
+    chmod -R u+w "$TEMP_EXTRACT"
+
+    # Update ALL syslinux boot configurations with correct UUID
+    for config_file in "$TEMP_EXTRACT/boot/syslinux/archiso_sys-linux.cfg" "$TEMP_EXTRACT/boot/syslinux/archiso_pxe-linux.cfg"; do
+        if [[ -f "$config_file" ]]; then
+            sed -i "s/archisosearchuuid=[^ ]*/archisosearchuuid=$ACTUAL_UUID/" "$config_file"
+            echo -e "${GREEN}✅ Updated $(basename "$config_file") with UUID $ACTUAL_UUID${NC}"
+        fi
+    done
+
+    # Update UEFI boot configuration
+    if [[ -d "$TEMP_EXTRACT/loader/entries" ]]; then
+        for entry_file in "$TEMP_EXTRACT/loader/entries"/*.conf; do
+            if [[ -f "$entry_file" ]]; then
+                sed -i "s/archisosearchuuid=[^ ]*/archisosearchuuid=$ACTUAL_UUID/" "$entry_file"
+            fi
+        done
+        echo -e "${GREEN}✅ UEFI boot configuration updated with UUID $ACTUAL_UUID${NC}"
+    fi
+
+    # Recreate ISO with corrected boot configs
+    echo -e "${BLUE}📀 Recreating ISO with corrected boot configurations...${NC}"
+
+    if command -v xorriso &>/dev/null; then
+        # Check for EFI boot files
+        EFI_BOOT_FILE=""
+        if [[ -f "$TEMP_EXTRACT/EFI/BOOT/bootx64.efi" ]]; then
+            EFI_BOOT_FILE="EFI/BOOT/bootx64.efi"
+        elif [[ -f "$TEMP_EXTRACT/EFI/BOOT/BOOTx64.EFI" ]]; then
+            EFI_BOOT_FILE="EFI/BOOT/BOOTx64.EFI"
+        fi
+
+        if [[ -n "$EFI_BOOT_FILE" ]]; then
+            xorriso -as mkisofs \
+                -iso-level 3 \
+                -full-iso9660-filenames \
+                -volid "ARCH_202507" \
+                -appid "ArchRiot Live/Rescue CD" \
+                -publisher "ArchRiot" \
+                -preparer "prepared by build-iso.sh" \
+                -eltorito-boot boot/syslinux/isolinux.bin \
+                -eltorito-catalog boot/syslinux/boot.cat \
+                -no-emul-boot \
+                -boot-load-size 4 \
+                -boot-info-table \
+                -eltorito-alt-boot \
+                -e "$EFI_BOOT_FILE" \
+                -no-emul-boot \
+                -isohybrid-gpt-basdat \
+                -output "$OUTPUT_ISO" \
+                "$TEMP_EXTRACT/" && {
+                echo -e "${GREEN}✅ ISO recreated with corrected UUID${NC}"
+            } || {
+                echo -e "${RED}❌ Failed to recreate ISO${NC}"
+                exit 1
+            }
+        else
+            echo -e "${RED}❌ EFI boot file not found${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${RED}❌ xorriso not available${NC}"
+        exit 1
+    fi
+
+    # Clean up temp extraction
+    sudo rm -rf "$TEMP_EXTRACT"
+
+    echo -e "${GREEN}✅ UUID mismatch fixed - boot configs now match actual ISO UUID${NC}"
+else
+    echo -e "${RED}❌ Could not extract UUID from ISO${NC}"
+    exit 1
+fi
+
+# Step 7: Automatic verification of UUID fix
+echo -e "${BLUE}🔍 Verifying UUID fix...${NC}"
+
+# Extract actual ISO UUID again to verify
+VERIFY_UUID=$(blkid -s UUID -o value "$OUTPUT_ISO" 2>/dev/null)
+if [[ -z "$VERIFY_UUID" ]]; then
+    echo -e "${RED}❌ Verification failed: Could not read ISO UUID${NC}"
+    exit 1
+fi
+
+# Mount ISO and check boot configs
+VERIFY_MOUNT="$BUILD_DIR/temp_verify"
+mkdir -p "$VERIFY_MOUNT"
+sudo mount -o loop "$OUTPUT_ISO" "$VERIFY_MOUNT" 2>/dev/null
+
+if [[ $? -ne 0 ]]; then
+    echo -e "${RED}❌ Verification failed: Could not mount ISO${NC}"
+    sudo rmdir "$VERIFY_MOUNT" 2>/dev/null || true
+    exit 1
+fi
+
+# Check if boot configs contain the correct UUID
+BOOT_UUIDS=$(grep -r "archisosearchuuid=" "$VERIFY_MOUNT/boot/" 2>/dev/null | grep -o "archisosearchuuid=[^[:space:]]*" | cut -d'=' -f2 | sort -u)
+sudo umount "$VERIFY_MOUNT"
+sudo rmdir "$VERIFY_MOUNT"
+
+# Verify all boot configs have the same UUID and it matches the ISO UUID
+UUID_COUNT=$(echo "$BOOT_UUIDS" | wc -l)
+UNIQUE_BOOT_UUID=$(echo "$BOOT_UUIDS" | head -1)
+
+if [[ "$UUID_COUNT" -eq 1 && "$UNIQUE_BOOT_UUID" == "$VERIFY_UUID" ]]; then
+    echo -e "${GREEN}✅ Verification PASSED: All boot configs match ISO UUID ($VERIFY_UUID)${NC}"
+else
+    echo -e "${RED}❌ Verification FAILED:${NC}"
+    echo -e "${RED}   ISO UUID: $VERIFY_UUID${NC}"
+    echo -e "${RED}   Boot config UUIDs found: $UUID_COUNT different values${NC}"
+    echo "$BOOT_UUIDS" | while read uuid; do
+        echo -e "${RED}   - $uuid${NC}"
+    done
+    exit 1
+fi
 
 # Mark for successful cleanup
 CLEANUP_ON_EXIT="true"
 
 # Offer to copy to USB
 echo
-echo -e "${BLUE}🚀 Ready for testing!${NC}"
+echo -e "${BLUE}🚀 Build verified and ready for testing!${NC}"
 read -p "Would you like to copy to USB? [Y/n]: " -n 1 -r
 echo
 
@@ -512,7 +711,7 @@ echo -e "${GREEN}🎉🎉🎉 ArchRiot ISO BUILD COMPLETE! 🎉🎉🎉${NC}"
 echo -e "${GREEN}================================================${NC}"
 echo -e "${GREEN}✅ ISO Size: $ISO_SIZE${NC}"
 echo -e "${GREEN}✅ UEFI + BIOS Boot Support${NC}"
-PKG_COUNT=$(ls package_cache/*.pkg.tar.* 2>/dev/null | wc -l)
+PKG_COUNT=$(ls "$BUILD_DIR/package_cache"/*.pkg.tar.* 2>/dev/null | wc -l)
 echo -e "${GREEN}✅ Complete Package Cache ($PKG_COUNT packages)${NC}"
 echo -e "${GREEN}✅ Seamless Installer Experience${NC}"
 echo -e "${GREEN}✅ Ready for Hardware Testing${NC}"

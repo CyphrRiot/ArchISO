@@ -1,0 +1,16 @@
+{
+  "file_scan_exclusions": [
+    "**/build",
+    "**/build/**",
+    "**/*.iso",
+    "**/*.img",
+    "**/package_cache",
+    "**/iso_extract",
+    "**/work_dir",
+    "**/efi_mnt",
+    "**/temp_*"
+  ],
+  "file_types": {
+    "ArchISO Build": ["build/**"]
+  }
+}

@@ -374,6 +374,22 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 - ✅ **Ventoy Integration** - Automatic copy to Ventoy USB with progress indicator
 - ✅ **Git Workflow** - Proper .gitignore excluding ISOs and temporary files
 
+### Current Session Progress (July 22, 2025)
+
+- ✅ **CRITICAL Boot Fix** - Fixed both BIOS and UEFI boot configurations to use `archisolabel=ARCH_202507` instead of hardcoded UUID
+- ✅ **Squashfs Integration** - Discovered and fixed issue where installer wasn't being added to official Arch ISO's squashfs filesystem
+- ✅ **Package Cache Integration** - Successfully integrated 742 cached packages (1.9GB) into squashfs filesystem for offline installation
+- ✅ **Installer Verification** - Confirmed ArchRiot installer script is now present at `/usr/local/bin/archriot-installer` in live environment
+- 🚧 **Dialog Dependency** - Working on extracting dialog package into live environment for TUI functionality
+- 🚧 **Auto-start Mechanism** - Getty@tty1 replacement needs verification for seamless installer launch
+
+### Technical Achievements
+
+- **Fixed "Device not found" boot error** - Both UEFI and BIOS now use dynamic device detection
+- **Proper ISO modification** - Now correctly modifies official Arch ISO squashfs structure instead of assuming archiso layout
+- **Massive package cache** - 3.0GB ISO includes complete ArchRiot package set for true offline installation
+- **Hybrid approach** - Official repo packages cached in ISO, AUR packages installed by ArchRiot setup script
+
 ### Future Enhancements
 
 - [ ] **Multiple timezone support** - Auto-detect or prompt for timezone

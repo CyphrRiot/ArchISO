@@ -1,51 +1,46 @@
-# OhmArchy - Git Ignore File
-# Prevents sensitive information from being committed
-
-# Mail configuration with credentials
-
-# User-specific configurations
-config/omarchy/user.env
-
-# old scripts
-old-scripts/
-
-# iso crap
-airootfs/
-airootfs_mount/
-
-# NEVER COMMIT THE ISO
-archlinux.iso
+# Build artifacts and temporary files
+build/
+build/**/*
 *.iso
+*.img
 
-# Temporary files
-*.tmp
-*.temp
-*~
-.DS_Store
-Thumbs.db
+# do not add the plan!
+plan.md
+
+# Package cache (moved to build/)
+package_cache/
+
+# Temporary extraction directories (old locations)
+iso_extract/
+work_dir/
+efi_mnt/
+temp_verify/
+temp_uuid_fix/
+
+# Explicit build subdirectories
+**/iso_extract/
+**/work_dir/
+**/efi_mnt/
+**/temp_verify/
+**/temp_uuid_fix/
+**/package_cache/
+**/*.pkg.tar.*
+
+# Log files
+*.log
 
 # Editor files
 .vscode/
 .idea/
 *.swp
 *.swo
-*.orig
+*~
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Log files
-*.log
-
-# Personal customizations
-personal/
-local/
-
-# Python Rope IDE artifacts
-.ropeproject/
-plan.md
-iso_extract/
-package_cache/
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
