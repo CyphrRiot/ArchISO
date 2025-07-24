@@ -4,6 +4,9 @@ build/**/*
 *.iso
 *.img
 
+# NO LOGS!!!
+logs/*
+
 # do not add the plan!
 plan.md
 
