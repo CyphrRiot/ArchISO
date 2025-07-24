@@ -1,10 +1,14 @@
 #!/bin/bash
 
-# ArchRiot Automated Installer
-# A simple TUI installer that automates the ArchRiot installation process
-# Following the exact guidelines from ArchRiot README.md
+# ArchRiot Installer Test Version
+# Testing WiFi UI without actual installation
+# Stubs out installation parts for safe testing
+# ArchRiot Installer Test Version
+# Testing WiFi UI without actual installation
+# Stubs out installation parts for safe testing
 
-set -e
+# Don't exit on errors in test mode
+set +e
 
 # Debug mode - set to 1 to enable debug output
 DEBUG_MODE="${DEBUG_MODE:-0}"
@@ -35,27 +39,24 @@ ARCHINSTALL_CONFIG="/tmp/archriot-config.json"
 
 # Logging functions with Tokyo Night styling
 log() {
-    # Suppress output during WiFi setup
-    return 0
+    echo -e "${GRAY}[$(date '+%H:%M:%S')]${NC} $1"
 }
 
 error() {
-    # Suppress output during WiFi setup
-    return 0
+    echo -e "${RED}[✗ ERROR]${NC} $1"
 }
 
 success() {
-    # Suppress output during WiFi setup
-    return 0
+    echo -e "${GREEN}[✓ SUCCESS]${NC} $1"
 }
 
 warn() {
-    # Suppress output during WiFi setup
-    return 0
+    echo -e "${ORANGE}[⚠ WARNING]${NC} $1"
 }
 
 # Check if dialog is available, fallback to basic prompts
 if ! command -v dialog &> /dev/null; then
+    echo "Dialog not found. Using basic prompts."
     USE_DIALOG=false
 else
     USE_DIALOG=true
@@ -190,12 +191,16 @@ IMPORTANT: Disk encryption (LUKS) is required and will be enabled automatically.
     fi
 }
 
-# Check internet connectivity
+# Check internet connectivity - STUBBED FOR TESTING
 check_internet() {
-    if ping -c 1 google.com &>/dev/null || ping -c 1 8.8.8.8 &>/dev/null; then
-        return 0
-    else
+    echo "TEST: Simulating internet check..."
+    # Simulate sometimes having internet, sometimes not for testing
+    if [ $((RANDOM % 3)) -eq 0 ]; then
+        echo "TEST: Simulating NO internet connection"
         return 1
+    else
+        echo "TEST: Simulating internet connection available"
+        return 0
     fi
 }
 
@@ -875,17 +880,16 @@ Note: The first boot may take a few extra moments to initialize services." 14 70
 
     success "ArchRiot installation completed successfully!"
     log "System will reboot in 10 seconds..."
-
-    # Clean up
-    rm -f "$ARCHINSTALL_CONFIG" /tmp/input_result /tmp/password_result /tmp/menu_result
-
-    # Reboot
-    sleep 10
-    reboot
+    # TEST MODE - Skip actual installation
+    echo "TEST MODE: WiFi setup completed successfully!"
+    echo "In real mode, installation would proceed here."
+    echo "Press any key to exit test..."
+    read
+    exit 0
 }
 
 # Handle Ctrl+C gracefully
-trap 'echo -e "\n${YELLOW}Installation interrupted by user${NC}"; exit 1' INT
+trap 'echo -e "\n${YELLOW}Test interrupted by user${NC}"; exit 1' INT
 
 # Run main function
 main "$@"
