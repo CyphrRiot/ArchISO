@@ -207,12 +207,8 @@ Continue with ethernet connection?" 12 60; then
     # Use first WiFi interface
     WIFI_INTERFACE=$(echo "$WIFI_INTERFACES" | head -1)
 
-    show_dialog --msgbox "WiFi Setup Required
-
-No internet connection detected.
-Setting up WiFi on interface: $WIFI_INTERFACE
-
-The next screen will scan for networks..." 12 65
+    log "Setting up WiFi on interface: $WIFI_INTERFACE"
+    log "Scanning for networks..."
 
     # Scan for networks
     iwctl station "$WIFI_INTERFACE" scan </dev/null >/dev/null 2>&1
@@ -716,10 +712,13 @@ select_timezone() {
         "America/New_York" "US Eastern"
         "America/Chicago" "US Central"
         "America/Los_Angeles" "US Pacific"
+        "America/Denver" "US Mountain"
+        "America/Phoenix" "US Arizona"
         "Europe/London" "UK"
-        "Europe/Paris" "Europe Central"
+        "Europe/Paris" "Central Europe"
+        "Europe/Berlin" "Germany"
         "Asia/Tokyo" "Japan"
-        "Australia/Sydney" "Australia"
+        "Australia/Sydney" "Australia East"
     )
 
     SELECTED_TIMEZONE=$(menu_dialog "Timezone Selection" "Current: $current_tz\nSelect timezone:" "${timezones[@]}")
@@ -729,13 +728,13 @@ select_timezone() {
         SELECTED_TIMEZONE="$current_tz"
     fi
 
-    # Set timezone
-    timedatectl set-timezone "$SELECTED_TIMEZONE" 2>/dev/null || {
-        SELECTED_TIMEZONE="UTC"
-        timedatectl set-timezone "UTC"
-    }
-
-    success "Timezone set to: $SELECTED_TIMEZONE"
+    # Set timezone (don't fail if we can't set it in live environment)
+    if timedatectl set-timezone "$SELECTED_TIMEZONE" 2>/dev/null; then
+        success "Timezone set to: $SELECTED_TIMEZONE"
+    else
+        warn "Cannot set timezone in live environment - will be set during installation"
+        log "Selected timezone: $SELECTED_TIMEZONE"
+    fi
 }
 
 # Select keyboard layout
