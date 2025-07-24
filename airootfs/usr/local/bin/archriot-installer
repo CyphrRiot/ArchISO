@@ -120,11 +120,12 @@ input_dialog() {
 
 password_dialog() {
     if $USE_DIALOG; then
-        dialog --passwordbox "$1" 12 60 2>/tmp/password_result >&2
+        dialog --passwordbox "$1" 12 60 2>/tmp/password_result
         if [ $? -eq 0 ]; then
             cat /tmp/password_result
             rm -f /tmp/password_result
         else
+            rm -f /tmp/password_result
             echo ""
         fi
     else
@@ -264,22 +265,8 @@ Retry scan?" 8 60; then
         echo "DEBUG: Raw iwctl output: $RAW_OUTPUT" >&2
     fi
 
-    # Use simple iwctl command and parse cleanly - handle network names with spaces
-    NETWORKS=$(echo "$RAW_OUTPUT" | awk '
-        /--------/ { flag=1; next }
-        flag && /^[[:space:]]*[>]*[[:space:]]*[A-Za-z0-9]/ {
-            # Remove leading whitespace and > symbol
-            gsub(/^[[:space:]]*[>]*[[:space:]]*/, "")
-            # Extract network name (everything before "psk", "open", "8021x", etc.)
-            if (match($0, /^[^[:space:]]+[[:space:]]+[A-Za-z0-9]*[[:space:]]+/)) {
-                # Network name with spaces - extract up to security column
-                gsub(/[[:space:]]+(psk|open|8021x|none)[[:space:]]+.*$/, "")
-                print
-            } else {
-                # Simple network name without spaces
-                print $1
-            }
-        }' | head -10)
+    # Use simple iwctl command and parse cleanly - SIMPLE AND RELIABLE
+    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "^\s*(>)?\s*[A-Za-z0-9]" | grep -v "Network name" | grep -v "Available networks" | sed 's/^\s*>\?\s*//' | awk '{print $1}' | head -10)
 
     if [ -z "$NETWORKS" ]; then
         if [ "$DEBUG_MODE" = "1" ]; then
