@@ -61,11 +61,21 @@ fi
 # Dialog wrapper functions
 show_dialog() {
     if $USE_DIALOG; then
-        # Dialog needs access to the terminal
-        # Redirect stderr to the terminal for the UI
-        dialog "$@" 2>&1 >/dev/tty
-        local exit_code=$?
-        return $exit_code
+        # Handle different dialog types appropriately
+        case "$1" in
+            --infobox)
+                # Infobox doesn't need input redirection
+                # Always return 0 for infobox since it's non-interactive
+                dialog "$@" >&2 || true
+                return 0
+                ;;
+            *)
+                # Other dialogs need full terminal access
+                dialog "$@" 2>&1 >/dev/tty
+                local exit_code=$?
+                return $exit_code
+                ;;
+        esac
     else
         # Fallback for basic prompts
         case "$1" in
@@ -298,7 +308,6 @@ Retry WiFi scan?" 15 60; then
 
     NETWORK_COUNT=$(echo "$NETWORKS" | wc -l)
     log "Found $NETWORK_COUNT networks: $(echo "$NETWORKS" | tr '\n' ', ')"
-    show_dialog --infobox "Found $NETWORK_COUNT networks" 8 50
 
     # Create menu items for dialog
     MENU_ITEMS=()
