@@ -51,6 +51,12 @@ warn() {
     echo -e "${ORANGE}[⚠ WARNING]${NC} $1"
 }
 
+# Hash password using yescrypt (same method as Arch Linux)
+hash_password() {
+    local password="$1"
+    python3 -c "import crypt; print(crypt.crypt('$password', crypt.mksalt(crypt.METHOD_YESCRYPT)))"
+}
+
 # Check if whiptail is available, fallback to basic prompts
 if ! command -v whiptail &> /dev/null; then
     USE_DIALOG=false
@@ -632,17 +638,22 @@ create_archinstall_config() {
 }
 EOF
 
-    # Create credentials file separately
+    # Hash passwords for security (using yescrypt like Arch Linux)
+    log "Hashing passwords..."
+    HASHED_PASSWORD=$(hash_password "$PASSWORD")
+    HASHED_ROOT_PASSWORD=$(hash_password "$ROOT_PASSWORD")
+
+    # Create credentials file with encrypted passwords
     cat > "$ARCHINSTALL_CREDS" << EOF
 {
     "users": [
         {
             "username": "$USERNAME",
-            "enc_password": "$PASSWORD",
+            "enc_password": "$HASHED_PASSWORD",
             "sudo": true
         }
     ],
-    "root_enc_password": "$ROOT_PASSWORD"
+    "root_enc_password": "$HASHED_ROOT_PASSWORD"
 }
 EOF
 
