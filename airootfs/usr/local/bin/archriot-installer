@@ -246,16 +246,28 @@ The next screen will scan for networks..." 12 65
 
     # Scan for networks
     log "Scanning for WiFi networks..."
-    show_dialog --infobox "Scanning for WiFi networks..." 8 50
-    iwctl station "$WIFI_INTERFACE" scan
+    iwctl station "$WIFI_INTERFACE" scan </dev/null >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        error "WiFi scan failed on interface $WIFI_INTERFACE. Check hardware or try ethernet."
+        if show_dialog --yesno "Retry scan?" 8 50; then
+            setup_wifi
+            return
+        else
+            warn "Skipping WiFi - checking ethernet"
+            if ! check_internet; then
+                error "No internet connection available. Cannot proceed with installation."
+                exit 1
+            fi
+            return 0
+        fi
+    fi
     sleep 5
 
     # Get available networks - SIMPLE and RELIABLE
-    log "Getting network list..."
-    show_dialog --infobox "Retrieving network list..." 8 50
+
 
     # Debug: Show raw iwctl output
-    RAW_OUTPUT=$(iwctl station "$WIFI_INTERFACE" get-networks 2>&1)
+    RAW_OUTPUT=$(iwctl station "$WIFI_INTERFACE" get-networks </dev/null 2>&1)
     if [ "$DEBUG_MODE" = "1" ]; then
         log "Raw iwctl output: $RAW_OUTPUT"
     fi
@@ -306,8 +318,7 @@ Retry WiFi scan?" 15 60; then
         fi
     fi
 
-    NETWORK_COUNT=$(echo "$NETWORKS" | wc -l)
-    log "Found $NETWORK_COUNT networks: $(echo "$NETWORKS" | tr '\n' ', ')"
+
 
     # Create menu items for dialog
     MENU_ITEMS=()
@@ -318,6 +329,12 @@ Retry WiFi scan?" 15 60; then
             i=$((i + 1))
         fi
     done <<< "$NETWORKS"
+
+    # Count networks accurately after filtering for debug logging
+    NETWORK_COUNT=$((${#MENU_ITEMS[@]} / 2))
+    if [ "$DEBUG_MODE" = "1" ]; then
+        log "Found $NETWORK_COUNT networks: $(echo "$NETWORKS" | tr '\n' ', ')"
+    fi
 
     if [ ${#MENU_ITEMS[@]} -eq 0 ]; then
         if show_dialog --yesno "No valid WiFi networks found after scanning.
@@ -413,11 +430,11 @@ Retry WiFi setup?" 12 60; then
     if [ -z "$WIFI_PASSWORD" ]; then
         # Try connecting without password (open network)
         log "Attempting to connect to open network..."
-        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK"
+        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK" </dev/null >/dev/null 2>&1
     else
         # Connect with password
         log "Connecting to WiFi network..."
-        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK" --passphrase "$WIFI_PASSWORD"
+        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK" --passphrase "$WIFI_PASSWORD" </dev/null >/dev/null 2>&1
     fi
 
     # Wait a moment and check connection
