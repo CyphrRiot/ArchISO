@@ -266,7 +266,7 @@ Retry scan?" 8 60; then
     fi
 
     # Use simple iwctl command and parse cleanly - SIMPLE AND RELIABLE
-    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "^\s*(>)?\s*[A-Za-z0-9]" | grep -v "Network name" | grep -v "Available networks" | sed 's/^\s*>\?\s*//' | awk '{print $1}' | head -10)
+    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "(psk|open|8021x)" | sed 's/^[[:space:]]*//' | awk '{print $1}' | head -10)
 
     if [ -z "$NETWORKS" ]; then
         if [ "$DEBUG_MODE" = "1" ]; then
