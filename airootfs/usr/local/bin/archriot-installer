@@ -6,11 +6,19 @@
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
+# Debug mode - set to 1 to enable debug output
+DEBUG_MODE="${DEBUG_MODE:-0}"
+
+
+
+# Tokyo Night theme colors for output
+RED='\033[38;5;203m'      # Tokyo Night red
+GREEN='\033[38;5;158m'    # Tokyo Night green
+YELLOW='\033[38;5;221m'   # Tokyo Night yellow
+BLUE='\033[38;5;116m'     # Tokyo Night cyan
+PURPLE='\033[38;5;183m'   # Tokyo Night purple
+ORANGE='\033[38;5;215m'   # Tokyo Night orange
+GRAY='\033[38;5;59m'      # Tokyo Night comment gray
 NC='\033[0m' # No Color
 
 # Global variables
@@ -25,26 +33,26 @@ SELECTED_TIMEZONE=""
 SELECTED_KEYBOARD=""
 ARCHINSTALL_CONFIG="/tmp/archriot-config.json"
 
-# Logging function
+# Logging functions with Tokyo Night styling
 log() {
-    echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} $1"
+    echo -e "${GRAY}[$(date '+%H:%M:%S')]${NC} $1"
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[✗ ERROR]${NC} $1"
 }
 
 success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    echo -e "${GREEN}[✓ SUCCESS]${NC} $1"
 }
 
 warn() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${ORANGE}[⚠ WARNING]${NC} $1"
 }
 
 # Check if dialog is available, fallback to basic prompts
 if ! command -v dialog &> /dev/null; then
-    warn "Dialog not available, using basic prompts"
+    echo "Dialog not found. Using basic prompts."
     USE_DIALOG=false
 else
     USE_DIALOG=true
@@ -54,6 +62,8 @@ fi
 show_dialog() {
     if $USE_DIALOG; then
         dialog "$@"
+        local exit_code=$?
+        return $exit_code
     else
         # Fallback for basic prompts
         case "$1" in
@@ -77,7 +87,7 @@ show_dialog() {
 
 input_dialog() {
     if $USE_DIALOG; then
-        dialog --inputbox "$1" 10 60 2>/tmp/input_result
+        dialog --inputbox "$1" 12 60 2>/tmp/input_result
         if [ $? -eq 0 ]; then
             cat /tmp/input_result
             rm -f /tmp/input_result
@@ -92,7 +102,7 @@ input_dialog() {
 
 password_dialog() {
     if $USE_DIALOG; then
-        dialog --passwordbox "$1" 10 60 2>/tmp/password_result
+        dialog --passwordbox "$1" 12 60 2>/tmp/password_result
         if [ $? -eq 0 ]; then
             cat /tmp/password_result
             rm -f /tmp/password_result
@@ -112,11 +122,31 @@ menu_dialog() {
     shift 2
 
     if $USE_DIALOG; then
-        dialog --menu "$title" 20 70 10 "$@" 2>/tmp/menu_result
-        if [ $? -eq 0 ]; then
-            cat /tmp/menu_result
+        if [ "$DEBUG_MODE" = "1" ]; then
+            echo "DEBUG: Running dialog with args count: $#" >&2
+            echo "DEBUG: Dialog args: $@" >&2
+            echo "DEBUG: About to execute dialog command..." >&2
+        fi
+        dialog --menu "$title" 20 70 12 "$@" 2>/tmp/menu_result
+        dialog_exit_code=$?
+        if [ "$DEBUG_MODE" = "1" ]; then
+            echo "DEBUG: Dialog exit code: $dialog_exit_code" >&2
+        fi
+
+
+
+        if [ $dialog_exit_code -eq 0 ]; then
+            result=$(cat /tmp/menu_result 2>/dev/null)
+            if [ "$DEBUG_MODE" = "1" ]; then
+                echo "DEBUG: Dialog result: '$result'" >&2
+            fi
+            echo "$result"
             rm -f /tmp/menu_result
         else
+            if [ "$DEBUG_MODE" = "1" ]; then
+                echo "DEBUG: Dialog cancelled (ESC pressed) or failed" >&2
+            fi
+            rm -f /tmp/menu_result
             echo ""
         fi
     else
@@ -149,9 +179,9 @@ This installer will:
 
 The installation follows the exact process from the ArchRiot README.md
 
-IMPORTANT: Disk encryption (LUKS) is required and will be enabled automatically." 18 70
+IMPORTANT: Disk encryption (LUKS) is required and will be enabled automatically." 18 75
 
-    if ! show_dialog --yesno "Do you want to continue with the ArchRiot installation?" 8 60; then
+    if ! show_dialog --yesno "Do you want to continue with the ArchRiot installation?" 8 65; then
         exit 0
     fi
 }
@@ -196,26 +226,61 @@ setup_wifi() {
 No internet connection detected.
 Setting up WiFi on interface: $WIFI_INTERFACE
 
-The next screen will scan for networks..." 10 60
+The next screen will scan for networks..." 12 65
 
     # Scan for networks
     log "Scanning for WiFi networks..."
+    show_dialog --infobox "Scanning for WiFi networks..." 8 50
     iwctl station "$WIFI_INTERFACE" scan
-    sleep 3
+    sleep 5
 
-    # Get available networks
-    NETWORKS=$(iwctl station "$WIFI_INTERFACE" get-networks | grep -v "Available networks" | grep -v "^$" | awk 'NR>4 && NF>=4 {for(i=1;i<=NF-3;i++) printf "%s%s", $i, (i<NF-3?" ":""); print ""}' | head -20)
+    # Get available networks - SIMPLE and RELIABLE
+    log "Getting network list..."
+    show_dialog --infobox "Retrieving network list..." 8 50
+
+    # Debug: Show raw iwctl output
+    RAW_OUTPUT=$(iwctl station "$WIFI_INTERFACE" get-networks 2>&1)
+    if [ "$DEBUG_MODE" = "1" ]; then
+        log "Raw iwctl output: $RAW_OUTPUT"
+    fi
+
+    # Use simple iwctl command and parse cleanly - handle network names with spaces
+    NETWORKS=$(echo "$RAW_OUTPUT" | awk '
+        /--------/ { flag=1; next }
+        flag && /^[[:space:]]*[>]*[[:space:]]*[A-Za-z0-9]/ {
+            # Remove leading whitespace and > symbol
+            gsub(/^[[:space:]]*[>]*[[:space:]]*/, "")
+            # Extract network name (everything before "psk", "open", "8021x", etc.)
+            if (match($0, /^[^[:space:]]+[[:space:]]+[A-Za-z0-9]*[[:space:]]+/)) {
+                # Network name with spaces - extract up to security column
+                gsub(/[[:space:]]+(psk|open|8021x|none)[[:space:]]+.*$/, "")
+                print
+            } else {
+                # Simple network name without spaces
+                print $1
+            }
+        }' | head -10)
 
     if [ -z "$NETWORKS" ]; then
-        error "No WiFi networks found"
+        if [ "$DEBUG_MODE" = "1" ]; then
+            log "DEBUG: No networks parsed. Raw output was: $RAW_OUTPUT"
+        fi
+        show_dialog --msgbox "No WiFi networks found.
+
+Check if WiFi is enabled and try again." 10 60
+        error "No WiFi networks found. Check if WiFi is enabled and try again."
         exit 1
     fi
+
+    NETWORK_COUNT=$(echo "$NETWORKS" | wc -l)
+    log "Found $NETWORK_COUNT networks: $(echo "$NETWORKS" | tr '\n' ', ')"
+    show_dialog --infobox "Found $NETWORK_COUNT networks" 8 50
 
     # Create menu items for dialog
     MENU_ITEMS=()
     i=1
     while IFS= read -r network; do
-        if [ -n "$network" ]; then
+        if [ -n "$network" ] && [ "$network" != "Available" ] && [ "$network" != "networks" ]; then
             MENU_ITEMS+=("$i" "$network")
             i=$((i + 1))
         fi
@@ -227,10 +292,21 @@ The next screen will scan for networks..." 10 60
     fi
 
     # Show network selection menu
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: MENU_ITEMS array has ${#MENU_ITEMS[@]} items:" >&2
+        for ((i=0; i<${#MENU_ITEMS[@]}; i+=2)); do
+            echo "DEBUG: MENU_ITEMS[$i]='${MENU_ITEMS[i]}' MENU_ITEMS[$((i+1))]='${MENU_ITEMS[i+1]}'" >&2
+        done
+    fi
+
     SELECTION=$(menu_dialog "WiFi Networks" "Select a WiFi network:" "${MENU_ITEMS[@]}")
 
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Raw selection result: '$SELECTION'" >&2
+    fi
+
     if [ -z "$SELECTION" ]; then
-        error "No network selected"
+        error "No network selected or dialog cancelled"
         exit 1
     fi
 
@@ -240,10 +316,26 @@ The next screen will scan for networks..." 10 60
         exit 1
     fi
 
+    # Debug: Show networks list for verification
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Full NETWORKS list:" >&2
+        echo "$NETWORKS" | nl >&2
+        echo "DEBUG: Total network lines: $(echo "$NETWORKS" | wc -l)" >&2
+    fi
+
     # Get selected network name
     SELECTED_NETWORK=$(echo "$NETWORKS" | sed -n "${SELECTION}p" 2>/dev/null | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
 
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Selected network (line $SELECTION): '$SELECTED_NETWORK'" >&2
+    fi
+
     if [ -z "$SELECTED_NETWORK" ]; then
+        if [ "$DEBUG_MODE" = "1" ]; then
+            echo "DEBUG: Failed to get network at line $SELECTION" >&2
+            echo "DEBUG: Available lines in NETWORKS:" >&2
+            echo "$NETWORKS" | cat -n >&2
+        fi
         error "Invalid network selection: selection $SELECTION out of range"
         exit 1
     fi
@@ -505,8 +597,7 @@ This will download and install:
 • Essential applications
 • Development tools
 
-This may take 15-30 minutes..." 12 70
-
+This may take 15-30 minutes..." 15 70
     # Transfer WiFi credentials to new system (if any exist)
     transfer_wifi_credentials
 
@@ -562,58 +653,38 @@ transfer_wifi_credentials() {
 select_timezone() {
     log "Setting up timezone..."
 
-    # Get list of all timezones
-    local timezones=($(timedatectl list-timezones))
-    local menu_items=()
+    # Get current timezone as default
+    local current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
 
-    # Create menu items for common timezones first
-    local common_zones=(
-        "America/New_York" "US Eastern"
-        "America/Chicago" "US Central"
-        "America/Denver" "US Mountain"
-        "America/Los_Angeles" "US Pacific"
-        "America/Phoenix" "US Arizona"
-        "Europe/London" "UK"
-        "Europe/Paris" "France/Germany"
-        "Europe/Rome" "Italy"
-        "Asia/Tokyo" "Japan"
-        "Asia/Shanghai" "China"
-        "Australia/Sydney" "Australia East"
-        "UTC" "UTC/GMT"
-    )
+    echo
+    echo "Timezone Setup"
+    echo "=============="
+    echo "Current timezone: $current_tz"
+    echo
+    echo "Common timezones:"
+    echo "- America/New_York (US Eastern)"
+    echo "- America/Chicago (US Central)"
+    echo "- America/Los_Angeles (US Pacific)"
+    echo "- Europe/London (UK)"
+    echo "- Europe/Paris (France/Germany)"
+    echo "- Asia/Tokyo (Japan)"
+    echo "- UTC (Universal)"
+    echo
 
-    # Add common zones
-    for ((i=0; i<${#common_zones[@]}; i+=2)); do
-        menu_items+=("${common_zones[i]}" "${common_zones[i+1]}")
-    done
+    SELECTED_TIMEZONE=$(input_dialog "Enter timezone (e.g. America/New_York) [$current_tz]:")
 
-    # Add separator
-    menu_items+=("---" "--- Other Timezones ---")
+    # Use current timezone if nothing entered
+    if [[ -z "$SELECTED_TIMEZONE" ]]; then
+        SELECTED_TIMEZONE="$current_tz"
+    fi
 
-    # Add all other timezones
-    for tz in "${timezones[@]}"; do
-        # Skip if already in common list
-        local is_common=false
-        for ((i=0; i<${#common_zones[@]}; i+=2)); do
-            if [[ "${common_zones[i]}" == "$tz" ]]; then
-                is_common=true
-                break
-            fi
-        done
-
-        if [[ "$is_common" == false ]]; then
-            menu_items+=("$tz" "$tz")
-        fi
-    done
-
-    SELECTED_TIMEZONE=$(menu_dialog "Timezone Selection" "Select your timezone:" "${menu_items[@]}")
-
-    if [[ -z "$SELECTED_TIMEZONE" || "$SELECTED_TIMEZONE" == "---" ]]; then
-        error "No timezone selected"
+    # Validate timezone
+    if ! timedatectl set-timezone "$SELECTED_TIMEZONE" 2>/dev/null; then
+        error "Invalid timezone: $SELECTED_TIMEZONE"
         exit 1
     fi
 
-    success "Timezone selected: $SELECTED_TIMEZONE"
+    success "Timezone set to: $SELECTED_TIMEZONE"
 }
 
 # Select keyboard layout

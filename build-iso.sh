@@ -164,19 +164,16 @@ cache_packages() {
     echo -e "${GREEN}✅ Already cached: $cached_count packages${NC}"
     echo -e "${BLUE}📥 Missing: ${#missing_packages[@]} packages${NC}"
 
-    # If all packages are cached, skip download prompt
+    # If all packages are cached, skip download
     if [[ ${#missing_packages[@]} -eq 0 ]]; then
         echo -e "${GREEN}🎉 All packages already cached! Using existing cache.${NC}"
         return 0
     fi
 
-    # Ask user if they want to download missing packages
-    echo -e "${YELLOW}⚠️  Downloading ${#missing_packages[@]} missing packages can take 5-15 minutes${NC}"
-    read -p "Download missing packages? [Y/n]: " -r
-    echo
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        echo -e "${BLUE}⏭️  Skipping package downloads - using existing cache only${NC}"
-        return 0
+    # Automatically download missing packages
+    echo -e "${BLUE}📥 Automatically downloading ${#missing_packages[@]} missing packages...${NC}"
+    if [[ ${#missing_packages[@]} -gt 50 ]]; then
+        echo -e "${YELLOW}⚠️  This may take 5-15 minutes for large package sets${NC}"
     fi
 
     # Download missing packages
@@ -344,45 +341,13 @@ mkdir -p "$AIROOTFS_DIR/usr/local/bin"
 cp airootfs/usr/local/bin/archriot-installer "$AIROOTFS_DIR/usr/local/bin/"
 chmod +x "$AIROOTFS_DIR/usr/local/bin/archriot-installer"
 
-# Replace getty@tty1 to directly launch installer
-mkdir -p "$AIROOTFS_DIR/etc/systemd/system"
-cat > "$AIROOTFS_DIR/etc/systemd/system/getty@tty1.service" << 'EOF'
-[Unit]
-Description=ArchRiot Installer on %I
-Documentation=man:agetty(8) man:systemd-getty-generator(8)
-Documentation=http://0pointer.de/blog/projects/serial-console.html
-After=systemd-user-sessions.service plymouth-quit-wait.service
-After=rc-local.service
-Before=getty.target
-IgnoreOnIsolate=yes
-ConditionPathExists=/dev/tty0
+# Add the archriot-install launcher command
+cp airootfs/usr/local/bin/archriot-install "$AIROOTFS_DIR/usr/local/bin/"
+chmod +x "$AIROOTFS_DIR/usr/local/bin/archriot-install"
 
-[Service]
-ExecStart=/usr/local/bin/archriot-installer
-Type=idle
-Restart=no
-RestartSec=0
-UtmpIdentifier=%I
-TTYPath=/dev/%I
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
-KillMode=process
-IgnoreSIGPIPE=no
-SendSIGHUP=yes
-StandardInput=tty
-StandardOutput=tty
-StandardError=tty
-User=root
-Environment=TERM=linux
-
-[Install]
-WantedBy=getty.target
-EOF
-
-# Enable the service by creating symlink
-mkdir -p "$AIROOTFS_DIR/etc/systemd/system/getty.target.wants"
-ln -sf "/etc/systemd/system/getty@tty1.service" "$AIROOTFS_DIR/etc/systemd/system/getty.target.wants/getty@tty1.service"
+# Add custom MOTD
+cp airootfs/etc/motd "$AIROOTFS_DIR/etc/"
+echo -e "${GREEN}✅ Added ArchRiot installer and welcome message${NC}"
 
 # Add package cache if available
 if [[ -d "$BUILD_DIR/package_cache" && -n "$(ls -A "$BUILD_DIR/package_cache" 2>/dev/null)" ]]; then
