@@ -459,7 +459,7 @@ You selected: $DISK_INFO
 
 This disk will be COMPLETELY ERASED and partitioned for ArchRiot installation.
 
-Are you absolutely sure you want to continue?" 12 66; then
+Are you absolutely sure you want to continue?" 12 64; then
         log "Disk selection cancelled by user"
         exit 0
     fi
