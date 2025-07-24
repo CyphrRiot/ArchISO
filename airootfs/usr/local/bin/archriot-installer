@@ -140,7 +140,7 @@ menu_dialog() {
     shift 2
 
     if $USE_DIALOG; then
-        dialog --clear --menu "$title" 15 60 8 "$@" 2>/tmp/dialog_result >&2
+        dialog --clear --menu "$title" 15 60 8 "$@" 2>/tmp/dialog_result
         if [ $? -eq 0 ]; then
             cat /tmp/dialog_result
             rm -f /tmp/dialog_result
