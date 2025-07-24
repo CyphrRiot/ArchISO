@@ -340,21 +340,23 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 - [x] **Fixed xorriso UEFI parameters** - Proper EFI boot file detection and hybrid ISO creation
 - [x] **Fixed package caching system** - Caches official repo packages, AUR handled by ArchRiot
 - [x] **Complete package verification** - Verified all packages against local ArchRiot repository
+- [ ] **CRITICAL: Timezone selection hanging** - Dialog menu hangs after "Setting up timezone..." message
 - [ ] **Validate offline installation** - Ensure cached packages work without internet
 
 ### Hardware Testing
 
-- [ ] **BIOS boot test** - Verify ISO boots on legacy BIOS systems
-- [ ] **Test installer TUI** - Confirm ArchRiot installer appears and is navigable
-- [ ] **WiFi detection test** - Verify wireless networks are detected and connectable
-- [ ] **Disk selection test** - Ensure disk detection and selection works safely
+- [x] **BIOS boot test** - Verified ISO boots on legacy BIOS systems
+- [x] **Test installer TUI** - ArchRiot installer appears and welcome screen works
+- [ ] **BROKEN: Timezone selection** - Installer hangs at timezone menu, blocking all testing
+- [ ] **WiFi detection test** - Cannot test due to timezone hang blocking progress
+- [ ] **Disk selection test** - Cannot test due to timezone hang blocking progress
 
 ### Installer Validation
 
-- [ ] **Complete installation flow** - Test full install from WiFi → user setup → ArchRiot
-- [ ] **archinstall integration** - Verify automated archinstall execution works
-- [ ] **Post-install ArchRiot setup** - Confirm ArchRiot desktop installs correctly
-- [ ] **First boot verification** - Test system boots to ArchRiot desktop after install
+- [ ] **BLOCKED: Complete installation flow** - Cannot proceed past timezone selection
+- [ ] **BLOCKED: archinstall integration** - Cannot test due to timezone menu hang
+- [ ] **BLOCKED: Post-install ArchRiot setup** - Cannot reach this step due to early hang
+- [ ] **BLOCKED: First boot verification** - Cannot complete installation to test
 
 ### Polish & Distribution
 
@@ -380,8 +382,10 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 - ✅ **Squashfs Integration** - Discovered and fixed issue where installer wasn't being added to official Arch ISO's squashfs filesystem
 - ✅ **Package Cache Integration** - Successfully integrated 742 cached packages (1.9GB) into squashfs filesystem for offline installation
 - ✅ **Installer Verification** - Confirmed ArchRiot installer script is now present at `/usr/local/bin/archriot-installer` in live environment
-- 🚧 **Dialog Dependency** - Working on extracting dialog package into live environment for TUI functionality
-- 🚧 **Auto-start Mechanism** - Getty@tty1 replacement needs verification for seamless installer launch
+- ✅ **Dialog Dependency** - Dialog package is available in live environment for TUI functionality
+- ✅ **Auto-start Mechanism** - Installer launches automatically on boot
+- ❌ **CRITICAL BUG: Timezone Menu Hanging** - Installer hangs indefinitely at timezone selection step, blocking all functionality
+- 🚧 **Menu System Debug** - Need to identify and fix dialog menu hanging issue in timezone selection
 
 ### Technical Achievements
 
@@ -389,10 +393,16 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 - **Proper ISO modification** - Now correctly modifies official Arch ISO squashfs structure instead of assuming archiso layout
 - **Massive package cache** - 3.0GB ISO includes complete ArchRiot package set for true offline installation
 - **Hybrid approach** - Official repo packages cached in ISO, AUR packages installed by ArchRiot setup script
+- **REGRESSION: Timezone Menu Bug** - Installer now hangs at timezone selection, preventing any installation testing
+
+### Immediate Fixes Needed
+
+- [ ] **URGENT: Fix timezone menu hanging** - Debug and resolve dialog menu freeze at timezone selection
+- [ ] **Menu system stability** - Ensure all dialog menus work reliably without hanging
+- [ ] **Error handling improvement** - Better fallbacks when dialog operations fail
 
 ### Future Enhancements
 
-- [ ] **Multiple timezone support** - Auto-detect or prompt for timezone
 - [ ] **Advanced disk options** - Support for custom partitioning schemes
 - [ ] **Automated testing** - VM-based CI/CD testing pipeline
 - [ ] **Package signature verification** - Verify cached packages before installation
@@ -402,3 +412,19 @@ This project follows the same license as ArchRiot. See the main ArchRiot reposit
 **🛡️⚔️🪐 Built for the ArchRiot Community 🪐⚔️🛡️**
 
 _Automated. Beautiful. Simple._
+
+## ⚠️ Current Status: BROKEN - Timezone Menu Hangs
+
+**CRITICAL ISSUE:** The installer currently hangs at the timezone selection step. The dialog menu system has a bug that causes it to freeze after displaying "Setting up timezone..." message. This prevents any installation testing or usage until resolved.
+
+**Known Working:**
+
+- ISO creation and building ✅
+- Boot process (UEFI + BIOS) ✅
+- Welcome screen and initial dialog ✅
+- Network connectivity check ✅
+
+**Known Broken:**
+
+- Timezone selection menu (hangs indefinitely) ❌
+- All subsequent installation steps (blocked) ❌

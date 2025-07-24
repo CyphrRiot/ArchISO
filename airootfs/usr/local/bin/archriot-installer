@@ -61,7 +61,9 @@ fi
 # Dialog wrapper functions
 show_dialog() {
     if $USE_DIALOG; then
-        dialog "$@"
+        # Dialog needs access to the terminal
+        # Redirect stderr to the terminal for the UI
+        dialog "$@" 2>&1 >/dev/tty
         local exit_code=$?
         return $exit_code
     else
@@ -81,13 +83,16 @@ show_dialog() {
                     esac
                 done
                 ;;
+            --infobox)
+                echo "$3"
+                ;;
         esac
     fi
 }
 
 input_dialog() {
     if $USE_DIALOG; then
-        dialog --inputbox "$1" 12 60 2>/tmp/input_result
+        dialog --inputbox "$1" 12 60 2>/tmp/input_result >&2
         if [ $? -eq 0 ]; then
             cat /tmp/input_result
             rm -f /tmp/input_result
@@ -102,7 +107,7 @@ input_dialog() {
 
 password_dialog() {
     if $USE_DIALOG; then
-        dialog --passwordbox "$1" 12 60 2>/tmp/password_result
+        dialog --passwordbox "$1" 12 60 2>/tmp/password_result >&2
         if [ $? -eq 0 ]; then
             cat /tmp/password_result
             rm -f /tmp/password_result
@@ -122,44 +127,30 @@ menu_dialog() {
     shift 2
 
     if $USE_DIALOG; then
-        if [ "$DEBUG_MODE" = "1" ]; then
-            echo "DEBUG: Running dialog with args count: $#" >&2
-            echo "DEBUG: Dialog args: $@" >&2
-            echo "DEBUG: About to execute dialog command..." >&2
-        fi
-        dialog --menu "$title" 20 70 12 "$@" 2>/tmp/menu_result
-        dialog_exit_code=$?
-        if [ "$DEBUG_MODE" = "1" ]; then
-            echo "DEBUG: Dialog exit code: $dialog_exit_code" >&2
-        fi
-
-
-
-        if [ $dialog_exit_code -eq 0 ]; then
-            result=$(cat /tmp/menu_result 2>/dev/null)
-            if [ "$DEBUG_MODE" = "1" ]; then
-                echo "DEBUG: Dialog result: '$result'" >&2
-            fi
-            echo "$result"
-            rm -f /tmp/menu_result
+        dialog --clear --menu "$title" 15 60 8 "$@" 2>/tmp/dialog_result >&2
+        if [ $? -eq 0 ]; then
+            cat /tmp/dialog_result
+            rm -f /tmp/dialog_result
         else
-            if [ "$DEBUG_MODE" = "1" ]; then
-                echo "DEBUG: Dialog cancelled (ESC pressed) or failed" >&2
-            fi
-            rm -f /tmp/menu_result
+            rm -f /tmp/dialog_result
             echo ""
         fi
     else
         echo "$text"
+        echo
         local i=1
         while [ $# -gt 0 ]; do
             echo "$i) $2"
             shift 2
             i=$((i + 1))
         done
-        read -p "Select option: " choice
-        # This is simplified for the fallback
-        echo "$choice"
+        echo
+        read -p "Select option (1-$((i-1))): " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -lt "$i" ]; then
+            echo "$choice"
+        else
+            echo ""
+        fi
     fi
 }
 
@@ -213,8 +204,23 @@ setup_wifi() {
     WIFI_INTERFACES=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || echo "")
 
     if [ -z "$WIFI_INTERFACES" ]; then
-        error "No WiFi interfaces found. Please connect ethernet cable."
-        exit 1
+        if show_dialog --yesno "No WiFi interfaces found.
+
+Do you have an ethernet connection?
+• Yes: Continue with ethernet
+• No: Exit installer
+
+Continue with ethernet connection?" 12 60; then
+            warn "No WiFi available, using ethernet connection"
+            if ! check_internet; then
+                error "No internet connection available via ethernet. Please check your connection."
+                exit 1
+            fi
+            return 0
+        else
+            log "Installation cancelled - no network interface available"
+            exit 1
+        fi
     fi
 
     # Use first WiFi interface
@@ -265,11 +271,29 @@ The next screen will scan for networks..." 12 65
         if [ "$DEBUG_MODE" = "1" ]; then
             log "DEBUG: No networks parsed. Raw output was: $RAW_OUTPUT"
         fi
-        show_dialog --msgbox "No WiFi networks found.
+        if show_dialog --yesno "No WiFi networks found.
 
-Check if WiFi is enabled and try again." 10 60
-        error "No WiFi networks found. Check if WiFi is enabled and try again."
-        exit 1
+This could happen if:
+• WiFi is disabled
+• No networks are in range
+• WiFi adapter needs time to initialize
+
+Do you want to:
+• Yes: Retry scanning for networks
+• No: Continue without WiFi (requires ethernet)
+
+Retry WiFi scan?" 15 60; then
+            log "Retrying WiFi scan..."
+            setup_wifi
+            return
+        else
+            warn "Skipping WiFi setup - checking ethernet connection"
+            if ! check_internet; then
+                error "No internet connection available. Cannot proceed with installation."
+                exit 1
+            fi
+            return 0
+        fi
     fi
 
     NETWORK_COUNT=$(echo "$NETWORKS" | wc -l)
@@ -287,8 +311,24 @@ Check if WiFi is enabled and try again." 10 60
     done <<< "$NETWORKS"
 
     if [ ${#MENU_ITEMS[@]} -eq 0 ]; then
-        error "No valid networks found"
-        exit 1
+        if show_dialog --yesno "No valid WiFi networks found after scanning.
+
+Do you want to:
+• Yes: Retry WiFi setup
+• No: Continue without WiFi (requires ethernet)
+
+Retry WiFi setup?" 12 60; then
+            log "Retrying WiFi setup..."
+            setup_wifi
+            return
+        else
+            warn "Continuing without WiFi - checking ethernet connection"
+            if ! check_internet; then
+                error "No internet connection available. Cannot proceed with installation."
+                exit 1
+            fi
+            return 0
+        fi
     fi
 
     # Show network selection menu
@@ -306,8 +346,24 @@ Check if WiFi is enabled and try again." 10 60
     fi
 
     if [ -z "$SELECTION" ]; then
-        error "No network selected or dialog cancelled"
-        exit 1
+        if show_dialog --yesno "No WiFi network selected.
+
+Do you want to:
+• Yes: Retry WiFi setup
+• No: Continue without WiFi (requires ethernet connection)
+
+Retry WiFi setup?" 12 60; then
+            log "Retrying WiFi setup..."
+            setup_wifi
+            return
+        else
+            warn "Continuing without WiFi setup - ethernet connection required"
+            if ! check_internet; then
+                error "No internet connection available. Cannot proceed with installation."
+                exit 1
+            fi
+            return 0
+        fi
     fi
 
     # Validate selection is a number
@@ -361,8 +417,31 @@ Check if WiFi is enabled and try again." 10 60
     if check_internet; then
         success "Successfully connected to WiFi"
     else
-        error "Failed to connect to WiFi. Please check password and try again."
-        exit 1
+        if show_dialog --yesno "WiFi Connection Failed
+
+Failed to connect to '$SELECTED_NETWORK'.
+
+This could be due to:
+• Incorrect password
+• Network issues
+• Signal strength problems
+
+Do you want to:
+• Yes: Retry WiFi setup
+• No: Continue without WiFi (requires ethernet)
+
+Retry WiFi setup?" 15 60; then
+            log "Retrying WiFi setup..."
+            setup_wifi
+            return
+        else
+            warn "Continuing without WiFi - checking ethernet connection"
+            if ! check_internet; then
+                error "No internet connection available. Cannot proceed with installation."
+                exit 1
+            fi
+            return 0
+        fi
     fi
 }
 
@@ -394,7 +473,13 @@ select_disk() {
 Select installation disk:" "${MENU_ITEMS[@]}")
 
     if [ -z "$SELECTED_DISK" ]; then
-        error "No disk selected"
+        show_dialog --msgbox "Installation Cancelled
+
+No disk was selected for installation.
+
+A disk must be selected to install ArchRiot.
+The installer will now exit." 10 50
+        log "Installation cancelled - no disk selected"
         exit 1
     fi
 
@@ -656,33 +741,29 @@ select_timezone() {
     # Get current timezone as default
     local current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
 
-    echo
-    echo "Timezone Setup"
-    echo "=============="
-    echo "Current timezone: $current_tz"
-    echo
-    echo "Common timezones:"
-    echo "- America/New_York (US Eastern)"
-    echo "- America/Chicago (US Central)"
-    echo "- America/Los_Angeles (US Pacific)"
-    echo "- Europe/London (UK)"
-    echo "- Europe/Paris (France/Germany)"
-    echo "- Asia/Tokyo (Japan)"
-    echo "- UTC (Universal)"
-    echo
+    local timezones=(
+        "UTC" "UTC (Universal)"
+        "America/New_York" "US Eastern"
+        "America/Chicago" "US Central"
+        "America/Los_Angeles" "US Pacific"
+        "Europe/London" "UK"
+        "Europe/Paris" "Europe Central"
+        "Asia/Tokyo" "Japan"
+        "Australia/Sydney" "Australia"
+    )
 
-    SELECTED_TIMEZONE=$(input_dialog "Enter timezone (e.g. America/New_York) [$current_tz]:")
+    SELECTED_TIMEZONE=$(menu_dialog "Timezone Selection" "Current: $current_tz\nSelect timezone:" "${timezones[@]}")
 
-    # Use current timezone if nothing entered
+    # Use current timezone if nothing selected
     if [[ -z "$SELECTED_TIMEZONE" ]]; then
         SELECTED_TIMEZONE="$current_tz"
     fi
 
-    # Validate timezone
-    if ! timedatectl set-timezone "$SELECTED_TIMEZONE" 2>/dev/null; then
-        error "Invalid timezone: $SELECTED_TIMEZONE"
-        exit 1
-    fi
+    # Set timezone
+    timedatectl set-timezone "$SELECTED_TIMEZONE" 2>/dev/null || {
+        SELECTED_TIMEZONE="UTC"
+        timedatectl set-timezone "UTC"
+    }
 
     success "Timezone set to: $SELECTED_TIMEZONE"
 }
@@ -710,9 +791,10 @@ select_keyboard() {
 
     SELECTED_KEYBOARD=$(menu_dialog "Keyboard Layout" "Select your keyboard layout:" "${keyboards[@]}")
 
+    # Use US layout as fallback if nothing selected (ESC pressed)
     if [[ -z "$SELECTED_KEYBOARD" ]]; then
-        error "No keyboard layout selected"
-        exit 1
+        SELECTED_KEYBOARD="us"
+        warn "No keyboard layout selected, using US English as default"
     fi
 
     # Apply keyboard layout immediately
