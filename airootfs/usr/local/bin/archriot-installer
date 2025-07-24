@@ -261,12 +261,16 @@ Retry scan?" 8 60; then
 
     # Debug: Show raw iwctl output
     RAW_OUTPUT=$(iwctl station "$WIFI_INTERFACE" get-networks </dev/null 2>&1)
-    if [ "$DEBUG_MODE" = "1" ]; then
-        echo "DEBUG: Raw iwctl output: $RAW_OUTPUT" >&2
-    fi
+    # DEBUG: Always show what's happening for troubleshooting
+    echo "DEBUG: Raw iwctl output length: ${#RAW_OUTPUT}" >&2
+    echo "DEBUG: First 200 chars: ${RAW_OUTPUT:0:200}" >&2
 
     # Use simple iwctl command and parse cleanly - SIMPLE AND RELIABLE
     NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "(psk|open|8021x)" | sed 's/^[[:space:]]*//' | awk '{print $1}' | head -10)
+
+    # DEBUG: Show parsing results
+    echo "DEBUG: Networks found: '$(echo "$NETWORKS" | wc -l)'" >&2
+    echo "DEBUG: Network list: '$NETWORKS'" >&2
 
     if [ -z "$NETWORKS" ]; then
         if [ "$DEBUG_MODE" = "1" ]; then
@@ -309,9 +313,9 @@ Retry WiFi scan?" 15 60; then
 
     # Count networks accurately after filtering for debug logging
     NETWORK_COUNT=$((${#MENU_ITEMS[@]} / 2))
-    if [ "$DEBUG_MODE" = "1" ]; then
-        echo "DEBUG: Found $NETWORK_COUNT networks: $(echo "$NETWORKS" | tr '\n' ', ')" >&2
-    fi
+    echo "DEBUG: MENU_ITEMS array size: ${#MENU_ITEMS[@]}" >&2
+    echo "DEBUG: Network count: $NETWORK_COUNT" >&2
+    echo "DEBUG: First few menu items: ${MENU_ITEMS[@]:0:10}" >&2
 
     if [ ${#MENU_ITEMS[@]} -eq 0 ]; then
         if show_dialog --yesno "No valid WiFi networks found after scanning.
