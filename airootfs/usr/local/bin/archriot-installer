@@ -51,10 +51,37 @@ warn() {
     echo -e "${ORANGE}[⚠ WARNING]${NC} $1"
 }
 
-# Hash password using yescrypt (same method as Arch Linux)
+# Hash password using libcrypt (same method as archinstall)
 hash_password() {
     local password="$1"
-    python3 -c "import crypt; print(crypt.crypt('$password', crypt.mksalt(crypt.METHOD_YESCRYPT)))"
+    # Use Python ctypes to call libcrypt.so directly (same as archinstall)
+    python3 -c "
+import ctypes
+import sys
+
+# Get password from command line argument (safer than string interpolation)
+password = sys.argv[1]
+
+# Load libcrypt
+libcrypt = ctypes.CDLL('libcrypt.so')
+libcrypt.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+libcrypt.crypt.restype = ctypes.c_char_p
+libcrypt.crypt_gensalt.argtypes = [ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p, ctypes.c_int]
+libcrypt.crypt_gensalt.restype = ctypes.c_char_p
+
+# Generate yescrypt salt (rounds=5, same as archinstall default)
+salt = libcrypt.crypt_gensalt(b'\$y\$', 5, None, 0)
+if not salt:
+    raise ValueError('crypt_gensalt() returned NULL')
+
+# Hash the password
+password_bytes = password.encode('utf-8')
+result = libcrypt.crypt(password_bytes, salt)
+if not result:
+    raise ValueError('crypt() returned NULL')
+
+print(result.decode('utf-8'))
+" "$password"
 }
 
 # Check if whiptail is available, fallback to basic prompts
@@ -377,6 +404,13 @@ Retry WiFi setup?" 12 60; then
     # Get password
     WIFI_PASSWORD=$(password_dialog "Enter password for '$SELECTED_NETWORK'")
 
+    # Show connection timing warning
+    show_dialog --msgbox "⏳ Network Connection
+
+Please wait at least 10 seconds for the network connection to establish after entering the password.
+
+The connection process may take some time to complete." 10 60
+
     if [ -z "$WIFI_PASSWORD" ]; then
         # Try connecting without password (open network)
         iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK" </dev/null >/dev/null 2>&1
@@ -490,33 +524,31 @@ setup_user() {
         USERNAME=$(input_dialog "Invalid username. Enter username (lowercase, start with letter)")
     done
 
-    # Get user password
-    PASSWORD=$(password_dialog "Enter password for user '$USERNAME'")
+    # Show password policy info
+    show_dialog --msgbox "Password Setup
+
+For simplicity, the same password will be used for:
+• Your user account ($USERNAME)
+• Root account (admin access)
+
+This reduces the number of passwords you need to remember." 10 60
+
+    # Get user password (will be used for both user and root)
+    PASSWORD=$(password_dialog "Enter password for $USERNAME and root")
     while [ -z "$PASSWORD" ] || [ ${#PASSWORD} -lt 6 ]; do
         PASSWORD=$(password_dialog "Password too short. Enter password (minimum 6 characters)")
     done
 
-    # Confirm user password
-    PASSWORD_CONFIRM=$(password_dialog "Confirm user password")
+    # Confirm password
+    PASSWORD_CONFIRM=$(password_dialog "Confirm password")
     while [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; do
         warn "Passwords do not match"
-        PASSWORD=$(password_dialog "Enter password for user '$USERNAME'")
-        PASSWORD_CONFIRM=$(password_dialog "Confirm user password")
+        PASSWORD=$(password_dialog "Enter password for $USERNAME and root")
+        PASSWORD_CONFIRM=$(password_dialog "Confirm password")
     done
 
-    # Get root password
-    ROOT_PASSWORD=$(password_dialog "Enter root password")
-    while [ -z "$ROOT_PASSWORD" ] || [ ${#ROOT_PASSWORD} -lt 6 ]; do
-        ROOT_PASSWORD=$(password_dialog "Root password too short. Enter password (minimum 6 characters)")
-    done
-
-    # Confirm root password
-    ROOT_PASSWORD_CONFIRM=$(password_dialog "Confirm root password")
-    while [ "$ROOT_PASSWORD" != "$ROOT_PASSWORD_CONFIRM" ]; do
-        warn "Root passwords do not match"
-        ROOT_PASSWORD=$(password_dialog "Enter root password")
-        ROOT_PASSWORD_CONFIRM=$(password_dialog "Confirm root password")
-    done
+    # Use same password for root
+    ROOT_PASSWORD="$PASSWORD"
 
     # Get LUKS encryption password
     LUKS_PASSWORD=$(password_dialog "Enter disk encryption (LUKS) password")
@@ -622,9 +654,13 @@ create_archinstall_config() {
         ],
         "disk_encryption": {
             "encryption_type": "luks",
-            "encryption_password": "$LUKS_PASSWORD"
+            "partitions": ["root-partition"],
+            "lvm_volumes": []
         }
     },
+    "encryption_password": "$LUKS_PASSWORD",
+    "services": [],
+    "custom_commands": [],
     "mirror_config": {
         "mirror_regions": {},
         "custom_servers": []
@@ -643,7 +679,7 @@ EOF
     HASHED_PASSWORD=$(hash_password "$PASSWORD")
     HASHED_ROOT_PASSWORD=$(hash_password "$ROOT_PASSWORD")
 
-    # Create credentials file with encrypted passwords
+    # Create credentials file with encrypted passwords and LUKS password
     cat > "$ARCHINSTALL_CREDS" << EOF
 {
     "users": [
