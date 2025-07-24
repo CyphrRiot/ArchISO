@@ -32,6 +32,7 @@ WIFI_INTERFACE=""
 SELECTED_TIMEZONE=""
 SELECTED_KEYBOARD=""
 ARCHINSTALL_CONFIG="/tmp/archriot-config.json"
+ARCHINSTALL_CREDS="/tmp/archriot-creds.json"
 
 # Logging functions with Tokyo Night styling
 log() {
@@ -458,7 +459,7 @@ You selected: $DISK_INFO
 
 This disk will be COMPLETELY ERASED and partitioned for ArchRiot installation.
 
-Are you absolutely sure you want to continue?" 12 70; then
+Are you absolutely sure you want to continue?" 12 66; then
         log "Disk selection cancelled by user"
         exit 0
     fi
@@ -536,77 +537,105 @@ create_archinstall_config() {
 
     cat > "$ARCHINSTALL_CONFIG" << EOF
 {
+    "version": "3.0.8",
+    "archinstall-language": "English",
+    "hostname": "$HOSTNAME",
+    "kernels": ["linux"],
+    "ntp": true,
+    "packages": ["wget", "curl", "git", "base-devel", "networkmanager", "iwd"],
+    "parallel_downloads": 5,
+    "swap": true,
+    "timezone": "$SELECTED_TIMEZONE",
+    "bootloader": "Systemd-boot",
+    "locale_config": {
+        "kb_layout": "$SELECTED_KEYBOARD",
+        "sys_enc": "UTF-8",
+        "sys_lang": "en_US"
+    },
     "disk_config": {
-        "config_type": "default_layout",
+        "config_type": "manual_partitioning",
         "device_modifications": [
             {
                 "device": "$SELECTED_DISK",
+                "wipe": true,
                 "partitions": [
                     {
+                        "obj_id": "boot-partition",
+                        "status": "create",
                         "type": "primary",
-                        "start": "1MiB",
-                        "size": "512MiB",
-                        "boot": true,
-                        "esp": true,
-                        "filesystem": {
-                            "type": "fat32"
-                        }
+                        "start": {
+                            "sector_size": null,
+                            "unit": "MiB",
+                            "value": 1
+                        },
+                        "size": {
+                            "sector_size": null,
+                            "unit": "GiB",
+                            "value": 1
+                        },
+                        "fs_type": "fat32",
+                        "mountpoint": "/boot",
+                        "mount_options": [],
+                        "flags": ["boot"],
+                        "btrfs": []
                     },
                     {
+                        "obj_id": "root-partition",
+                        "status": "create",
                         "type": "primary",
-                        "start": "513MiB",
-                        "size": "100%",
-                        "encrypted": true,
-                        "password": "$LUKS_PASSWORD",
-                        "filesystem": {
-                            "type": "btrfs"
-                        }
+                        "start": {
+                            "sector_size": null,
+                            "unit": "GiB",
+                            "value": 1
+                        },
+                        "size": {
+                            "sector_size": null,
+                            "unit": "Percent",
+                            "value": 100
+                        },
+                        "fs_type": "btrfs",
+                        "mountpoint": "/",
+                        "mount_options": [],
+                        "flags": [],
+                        "btrfs": []
                     }
                 ]
             }
-        ]
+        ],
+        "disk_encryption": {
+            "encryption_type": "luks",
+            "encryption_password": "$LUKS_PASSWORD"
+        }
     },
+    "mirror_config": {
+        "mirror_regions": {},
+        "custom_servers": []
+    },
+    "network_config": {
+        "type": "nm"
+    },
+    "audio_config": {
+        "audio": "pipewire"
+    }
+}
+EOF
+
+    # Create credentials file separately
+    cat > "$ARCHINSTALL_CREDS" << EOF
+{
     "users": [
         {
             "username": "$USERNAME",
-            "!password": "$PASSWORD",
+            "enc_password": "$PASSWORD",
             "sudo": true
         }
     ],
-    "!root-password": "$ROOT_PASSWORD",
-    "audio_config": {
-        "audio": "pipewire"
-    },
-    "kernels": ["linux"],
-    "locale_config": {
-        "sys_lang": "en_US.UTF-8",
-        "sys_enc": "UTF-8",
-        "keyboard": "$SELECTED_KEYBOARD"
-    },
-    "mirror_config": {
-        "custom_mirrors": [],
-        "mirror_regions": {
-            "United States": ["https://geo.mirror.pkgbuild.com/"]
-        }
-    },
-    "nic": {
-        "type": "nm"
-    },
-    "ntp": true,
-    "packages": [
-        "wget", "curl", "git", "base-devel", "networkmanager", "dialog", "iw", "iwd",
-        "sudo", "nano", "vim", "openssh", "rsync", "unzip", "zip", "htop",
-        "pipewire", "pipewire-alsa", "pipewire-pulse", "pipewire-jack",
-        "intel-ucode", "amd-ucode", "dosfstools", "e2fsprogs", "btrfs-progs",
-        "firefox", "python", "python-pip", "neovim"
-    ],
-    "profile_config": null,
-    "silent": false,
-    "timezone": "$SELECTED_TIMEZONE"
+    "root_enc_password": "$ROOT_PASSWORD"
 }
 EOF
 
     success "Configuration file created: $ARCHINSTALL_CONFIG"
+    success "Credentials file created: $ARCHINSTALL_CREDS"
 }
 
 # Run archinstall
@@ -616,7 +645,7 @@ run_archinstall() {
     show_dialog --msgbox "Starting Installation
 
 The automated installation will now begin.
-This process may take 10-30 minutes depending on your internet speed.
+This process may take under 10 minutes depending on your internet speed.
 
 The installer will:
 • Partition and encrypt $SELECTED_DISK
@@ -626,56 +655,88 @@ The installer will:
 
 Please be patient..." 14 70
 
-    # Run archinstall with our configuration
-    if archinstall --config "$ARCHINSTALL_CONFIG" --silent; then
+    # Validate configuration with dry-run first
+    log "Validating archinstall configuration..."
+    if ! archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --dry-run 2>/tmp/archinstall-validation.log; then
+        error "Configuration validation failed"
+        show_dialog --msgbox "Configuration Invalid
+
+The archinstall configuration is invalid and cannot be used.
+This indicates a bug in the installer.
+
+Please check /tmp/archinstall-validation.log for details.
+
+Press OK to exit." 10 60
+        exit 1
+    fi
+    success "Configuration validated successfully"
+
+    # Run archinstall with our configuration and credentials
+    if archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --silent 2>/tmp/archinstall-error.log; then
         success "Arch Linux installation completed successfully"
     else
         error "Arch Linux installation failed"
+        warn "Error details may be in /tmp/archinstall-error.log"
+        show_dialog --msgbox "Installation Failed
+
+The Arch Linux installation encountered an error.
+This may be due to hardware detection issues.
+
+You can:
+1. Try running the installer again
+2. Check /tmp/archinstall-error.log for details
+3. Use manual archinstall if the problem persists
+
+Press OK to exit." 12 60
         exit 1
     fi
 }
 
-# Install ArchRiot in the new system
+# Install ArchRiot welcome message for first boot
 install_archriot() {
-    log "Installing ArchRiot desktop environment..."
+    log "Setting up ArchRiot welcome message for first boot..."
 
-    show_dialog --msgbox "Installing ArchRiot
-
-Now installing the ArchRiot desktop environment in your new system.
-This will download and install:
-• Hyprland compositor
-• ArchRiot configurations and themes
-• Essential applications
-• Development tools
-
-This may take 15-30 minutes..." 15 70
     # Transfer WiFi credentials to new system (if any exist)
     transfer_wifi_credentials
 
-    # chroot into the new system and run ArchRiot setup
-    arch-chroot /mnt /bin/bash << 'CHROOT_EOF'
-# Ensure network is available in chroot
-systemctl enable NetworkManager
-systemctl start NetworkManager
+    # Create welcome script for first boot
+    arch-chroot /mnt /bin/bash -c "
+# Create welcome script
+mkdir -p /usr/local/bin
+cat > /usr/local/bin/archriot-welcome << 'WELCOME_EOF'
+#!/bin/bash
 
-# Wait a moment for network
-sleep 5
+# ArchRiot Welcome Message
+clear
+echo -e \"\033[0;35m\"
+echo \"╔══════════════════════════════════════════════════════════════╗\"
+echo \"║                    Welcome to Your New                       ║\"
+echo \"║                   ArchRiot Linux System!                     ║\"
+echo \"╚══════════════════════════════════════════════════════════════╝\"
+echo -e \"\033[0m\"
+echo
+echo -e \"\033[1;36mNext Step: Install ArchRiot Desktop Environment\033[0m\"
+echo
+echo \"Run this command to install ArchRiot:\"
+echo -e \"\033[1;32mcurl -fsSL https://ArchRiot.org/setup.sh | bash\033[0m\"
+echo
+echo \"This will install:\"
+echo \"• Hyprland compositor\"
+echo \"• ArchRiot configurations and themes\"
+echo \"• Essential applications\"
+echo \"• Development tools\"
+echo
+echo -e \"\033[1;33mPress Enter to continue to your shell...\033[0m\"
+read
+WELCOME_EOF
 
-# Download and run ArchRiot setup
-echo "Downloading ArchRiot setup script..."
-if curl -fsSL https://ArchRiot.org/setup.sh | bash; then
-    echo "ArchRiot installation completed successfully"
-else
-    echo "ArchRiot installation failed, but base system is installed"
-    exit 1
-fi
-CHROOT_EOF
+chmod +x /usr/local/bin/archriot-welcome
 
-    if [ $? -eq 0 ]; then
-        success "ArchRiot installation completed successfully"
-    else
-        warn "ArchRiot installation encountered issues, but base system is installed"
-    fi
+# Add welcome script to user's profile
+echo '/usr/local/bin/archriot-welcome' >> /home/$USERNAME/.bashrc
+"
+
+    success "ArchRiot welcome message configured for first boot"
 }
 
 # Transfer WiFi credentials to new system
