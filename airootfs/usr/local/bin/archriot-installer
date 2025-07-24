@@ -564,12 +564,18 @@ create_archinstall_config() {
                         "status": "create",
                         "type": "primary",
                         "start": {
-                            "sector_size": null,
+                            "sector_size": {
+                                "value": 512,
+                                "unit": "B"
+                            },
                             "unit": "MiB",
                             "value": 1
                         },
                         "size": {
-                            "sector_size": null,
+                            "sector_size": {
+                                "value": 512,
+                                "unit": "B"
+                            },
                             "unit": "GiB",
                             "value": 1
                         },
@@ -584,12 +590,18 @@ create_archinstall_config() {
                         "status": "create",
                         "type": "primary",
                         "start": {
-                            "sector_size": null,
+                            "sector_size": {
+                                "value": 512,
+                                "unit": "B"
+                            },
                             "unit": "GiB",
                             "value": 1
                         },
                         "size": {
-                            "sector_size": null,
+                            "sector_size": {
+                                "value": 512,
+                                "unit": "B"
+                            },
                             "unit": "Percent",
                             "value": 100
                         },
