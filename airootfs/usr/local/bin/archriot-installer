@@ -256,7 +256,11 @@ Continue with ethernet connection?" 12 60; then
     # Use first WiFi interface
     WIFI_INTERFACE=$(echo "$WIFI_INTERFACES" | head -1)
 
-    # WiFi setup will be handled silently to avoid disrupting TUI
+    # Show user feedback during network scanning
+    show_dialog --infobox "Scanning for WiFi networks...
+
+This may take 5-10 seconds.
+Please wait..." 8 50
 
     # Scan for networks
     iwctl station "$WIFI_INTERFACE" scan </dev/null >/dev/null 2>&1
@@ -290,7 +294,14 @@ Retry scan?" 8 60; then
     fi
 
     # Parse networks and filter out current connection and empty lines
-    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "(psk|open|8021x)" | sed 's/^[[:space:]]*//' | awk '{print $1}' | grep -v '^$' | grep -v "^$CURRENT_NETWORK$" | head -10)
+    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "(psk|open|8021x)" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*>[[:space:]]*//' | sed 's/^[[:space:]]*//' | awk '{print $1}' | grep -v '^$' | grep -v "^$CURRENT_NETWORK$" | sed '/^$/d' | head -10)
+
+    # DEBUG: Show exactly what we parsed
+    echo "DEBUG: Raw NETWORKS variable content:" >&2
+    echo "$NETWORKS" | cat -n >&2
+    echo "DEBUG: Number of network lines: $(echo "$NETWORKS" | wc -l)" >&2
+    echo "DEBUG: First line content: '$(echo "$NETWORKS" | head -1)'" >&2
+    echo "DEBUG: First line length: $(echo "$NETWORKS" | head -1 | wc -c)" >&2
 
     if [ -z "$NETWORKS" ]; then
         if [ "$DEBUG_MODE" = "1" ]; then
@@ -325,9 +336,13 @@ Retry WiFi scan?" 15 60; then
     MENU_ITEMS=()
     i=1
     while IFS= read -r network; do
+        echo "DEBUG: Processing network line: '$network' (length: $(echo -n "$network" | wc -c))" >&2
         if [ -n "$network" ] && [ "$network" != "Available" ] && [ "$network" != "networks" ]; then
+            echo "DEBUG: Adding to menu: '$i' '$network'" >&2
             MENU_ITEMS+=("$i" "$network")
             i=$((i + 1))
+        else
+            echo "DEBUG: Skipping network: '$network'" >&2
         fi
     done <<< "$NETWORKS"
 
@@ -624,15 +639,8 @@ create_archinstall_config() {
     # Calculate dynamic partition sizes based on selected disk
     DISK_SIZE_BYTES=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
 
-    # Boot partition: 1GB (1073741824 bytes)
-    BOOT_SIZE_BYTES=1073741824
-
-    # Root partition: remaining space (total - boot - 1MB for GPT)
-    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - BOOT_SIZE_BYTES - 1048576))
-
-    # Start positions (in sectors, 512 bytes each)
-    BOOT_START_SECTOR=34  # Standard GPT start
-    ROOT_START_SECTOR=$(((BOOT_SIZE_BYTES / 512) + BOOT_START_SECTOR))
+    # Root partition size: total disk - root start - GPT backup header space (32MB)
+    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - 1075838976 - 33554432))
 
     # Generate unique partition IDs
     BOOT_ID=$(uuidgen)
@@ -641,102 +649,131 @@ create_archinstall_config() {
     # Create main configuration file
     cat > "$ARCHINSTALL_CONFIG" << EOF
 {
-    "version": "3.0.8",
     "archinstall-language": "English",
-    "hostname": "$HOSTNAME",
-    "kernels": ["linux"],
-    "ntp": true,
-    "packages": ["wget", "curl", "git", "base-devel", "networkmanager", "iwd"],
-    "parallel_downloads": 5,
-    "swap": true,
-    "timezone": "$SELECTED_TIMEZONE",
-    "bootloader": "Systemd-boot",
-    "locale_config": {
-        "kb_layout": "$SELECTED_KEYBOARD",
-        "sys_enc": "UTF-8",
-        "sys_lang": "en_US"
+    "audio_config": {
+        "audio": "pipewire"
     },
+    "bootloader": "Systemd-boot",
+    "custom_commands": [],
     "disk_config": {
-        "config_type": "manual_partitioning",
+        "btrfs_options": {
+            "snapshot_config": null
+        },
+        "config_type": "default_layout",
         "device_modifications": [
             {
                 "device": "$SELECTED_DISK",
-                "wipe": true,
                 "partitions": [
                     {
                         "btrfs": [],
-                        "flags": ["Boot"],
+                        "dev_path": null,
+                        "flags": [
+                            "boot",
+                            "esp"
+                        ],
                         "fs_type": "fat32",
-                        "length": {
-                            "sector_size": null,
-                            "total_size": null,
-                            "unit": "B",
-                            "value": $BOOT_SIZE_BYTES
-                        },
                         "mount_options": [],
                         "mountpoint": "/boot",
                         "obj_id": "$BOOT_ID",
-                        "start": {
+                        "size": {
                             "sector_size": {
-                                "sector_size": null,
-                                "total_size": null,
                                 "unit": "B",
                                 "value": 512
                             },
-                            "total_size": null,
-                            "unit": "sectors",
-                            "value": $BOOT_START_SECTOR
+                            "unit": "GiB",
+                            "value": 1
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": 2097152
                         },
                         "status": "create",
                         "type": "primary"
                     },
                     {
-                        "btrfs": [],
+                        "btrfs": [
+                            {
+                                "mountpoint": "/",
+                                "name": "@"
+                            },
+                            {
+                                "mountpoint": "/home",
+                                "name": "@home"
+                            },
+                            {
+                                "mountpoint": "/var/log",
+                                "name": "@log"
+                            },
+                            {
+                                "mountpoint": "/var/cache/pacman/pkg",
+                                "name": "@pkg"
+                            }
+                        ],
+                        "dev_path": null,
                         "flags": [],
                         "fs_type": "btrfs",
-                        "length": {
-                            "sector_size": null,
-                            "total_size": null,
-                            "unit": "B",
-                            "value": $ROOT_SIZE_BYTES
-                        },
-                        "mount_options": [],
-                        "mountpoint": "/",
+                        "mount_options": [
+                            "compress=zstd"
+                        ],
+                        "mountpoint": null,
                         "obj_id": "$ROOT_ID",
-                        "start": {
+                        "size": {
                             "sector_size": {
-                                "sector_size": null,
-                                "total_size": null,
                                 "unit": "B",
                                 "value": 512
                             },
-                            "total_size": null,
-                            "unit": "sectors",
-                            "value": $ROOT_START_SECTOR
+                            "unit": "B",
+                            "value": $ROOT_SIZE_BYTES
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": 1075838976
                         },
                         "status": "create",
                         "type": "primary"
                     }
-                ]
+                ],
+                "wipe": true
             }
         ]
     },
-    "disk_encryption": {
-        "encryption_type": "luks",
-        "partitions": ["$ROOT_ID"]
+    "hostname": "$HOSTNAME",
+    "kernels": [
+        "linux"
+    ],
+    "locale_config": {
+        "kb_layout": "$SELECTED_KEYBOARD",
+        "sys_enc": "UTF-8",
+        "sys_lang": "en_US.UTF-8"
     },
-    "services": [],
-    "custom_commands": [],
     "mirror_config": {
-        "mirror_regions": {},
-        "custom_servers": []
+        "custom_repositories": [],
+        "custom_servers": [],
+        "mirror_regions": {
+            "United States": []
+        },
+        "optional_repositories": []
     },
     "network_config": {
-        "type": "nm"
+        "type": "iso"
     },
-    "audio_config": {
-        "audio": "pipewire"
-    }
+    "ntp": true,
+    "packages": [
+        "wget", "curl", "git", "base-devel", "networkmanager", "iwd"
+    ],
+    "parallel_downloads": 0,
+    "services": [],
+    "swap": false,
+    "timezone": "$SELECTED_TIMEZONE",
+    "version": null
 }
 EOF
 
@@ -750,8 +787,7 @@ EOF
             "sudo": true
         }
     ],
-    "root_enc_password": "$HASHED_ROOT_PASSWORD",
-    "encryption_password": "$LUKS_PASSWORD"
+    "root_enc_password": "$HASHED_ROOT_PASSWORD"
 }
 EOF
 
