@@ -640,8 +640,8 @@ create_archinstall_config() {
                                 "value": 512,
                                 "unit": "B"
                             },
-                            "unit": "Percent",
-                            "value": 100
+                            "unit": "sectors",
+                            "value": -1
                         },
                         "fs_type": "btrfs",
                         "mountpoint": "/",
