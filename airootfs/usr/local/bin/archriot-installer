@@ -212,6 +212,21 @@ check_internet() {
 
 # WiFi setup function
 setup_wifi() {
+    local retry_count=${1:-0}
+    local max_retries=3
+
+    # Prevent infinite loops
+    if [ $retry_count -ge $max_retries ]; then
+        error "WiFi setup failed after $max_retries attempts"
+        show_dialog --msgbox "WiFi Setup Failed
+
+Unable to connect to WiFi after multiple attempts.
+Please check your network or use ethernet connection.
+
+The installer will exit." 10 60
+        exit 1
+    fi
+
     # Check if already connected
     if check_internet; then
         return 0
@@ -241,8 +256,7 @@ Continue with ethernet connection?" 12 60; then
     # Use first WiFi interface
     WIFI_INTERFACE=$(echo "$WIFI_INTERFACES" | head -1)
 
-    log "Setting up WiFi on interface: $WIFI_INTERFACE"
-    log "Scanning for networks..."
+    # WiFi setup will be handled silently to avoid disrupting TUI
 
     # Scan for networks
     iwctl station "$WIFI_INTERFACE" scan </dev/null >/dev/null 2>&1
@@ -250,7 +264,7 @@ Continue with ethernet connection?" 12 60; then
         if show_dialog --yesno "WiFi scan failed on interface $WIFI_INTERFACE. Check hardware or try ethernet.
 
 Retry scan?" 8 60; then
-            setup_wifi
+            setup_wifi $((retry_count + 1))
             return
         else
             if ! check_internet; then
@@ -265,14 +279,18 @@ Retry scan?" 8 60; then
     # Get available networks - SIMPLE and RELIABLE
 
 
+    # Get currently connected network to filter it out
+    CURRENT_NETWORK=$(iwctl station "$WIFI_INTERFACE" show </dev/null 2>/dev/null | grep "Connected network" | awk '{print $3}' | tr -d '*')
+
     # Get available networks
     RAW_OUTPUT=$(iwctl station "$WIFI_INTERFACE" get-networks </dev/null 2>&1)
     if [ "$DEBUG_MODE" = "1" ]; then
         echo "DEBUG: Raw iwctl output: $RAW_OUTPUT" >&2
+        echo "DEBUG: Currently connected to: '$CURRENT_NETWORK'" >&2
     fi
 
-    # Use simple iwctl command and parse cleanly - SIMPLE AND RELIABLE
-    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "(psk|open|8021x)" | sed 's/^[[:space:]]*//' | awk '{print $1}' | head -10)
+    # Parse networks and filter out current connection and empty lines
+    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "(psk|open|8021x)" | sed 's/^[[:space:]]*//' | awk '{print $1}' | grep -v '^$' | grep -v "^$CURRENT_NETWORK$" | head -10)
 
     if [ -z "$NETWORKS" ]; then
         if [ "$DEBUG_MODE" = "1" ]; then
@@ -290,7 +308,7 @@ Do you want to:
 • No: Continue without WiFi (requires ethernet)
 
 Retry WiFi scan?" 15 60; then
-            setup_wifi
+            setup_wifi $((retry_count + 1))
             return
         else
             if ! check_internet; then
@@ -327,7 +345,7 @@ Do you want to:
 • No: Continue without WiFi (requires ethernet)
 
 Retry WiFi setup?" 12 60; then
-            setup_wifi
+            setup_wifi $((retry_count + 1))
             return
         else
             if ! check_internet; then
@@ -360,7 +378,7 @@ Do you want to:
 • No: Continue without WiFi (requires ethernet connection)
 
 Retry WiFi setup?" 12 60; then
-            setup_wifi
+            setup_wifi $((retry_count + 1))
             return
         else
             if ! check_internet; then
@@ -405,7 +423,7 @@ Retry WiFi setup?" 12 60; then
     WIFI_PASSWORD=$(password_dialog "Enter password for '$SELECTED_NETWORK'")
 
     # Show connection timing warning
-    show_dialog --msgbox "⏳ Network Connection
+    show_dialog --msgbox " -=- Network Connection -=-
 
 Please wait at least 10 seconds for the network connection to establish after entering the password.
 
@@ -439,7 +457,7 @@ Do you want to:
 • No: Continue without WiFi (requires ethernet)
 
 Retry WiFi setup?" 15 60; then
-            setup_wifi
+            setup_wifi $((retry_count + 1))
             return
         else
             warn "Continuing without WiFi - checking ethernet connection"
@@ -454,13 +472,38 @@ Retry WiFi setup?" 15 60; then
 
 # Disk selection function
 select_disk() {
-    log "Scanning available disks..."
+    # Scanning disks silently to avoid disrupting TUI
 
-    # Get list of disks (excluding loop devices, ram, etc.)
-    DISKS=$(lsblk -dno NAME,SIZE,MODEL | grep -E '^(sd|nvme|vd|hd)' | head -10)
+    # Detect boot device to exclude it from installation options
+    BOOT_DEVICE=""
+    # Check for mounted boot devices (USB drives, etc.)
+    for mount_point in $(mount | grep -E '^/dev/(sd|nvme|vd)' | awk '{print $1}' | sed 's/[0-9]*$//' | sort -u); do
+        # Check if this device contains the running system
+        if mount | grep -q "$mount_point.*\(rw\|ro\).*archiso"; then
+            BOOT_DEVICE=$(basename "$mount_point")
+            break
+        fi
+    done
+
+    # If no archiso mount found, check for removable media
+    if [ -z "$BOOT_DEVICE" ]; then
+        BOOT_DEVICE=$(lsblk -dno NAME,RM,TRAN | awk '$2==1 && $3=="usb" {print $1}' | head -1)
+    fi
+
+    # Boot device detection handled silently
+
+    # Get list of disks (excluding loop devices, ram, boot device, etc.)
+    if [ -n "$BOOT_DEVICE" ]; then
+        DISKS=$(lsblk -dno NAME,SIZE,MODEL | grep -E '^(sd|nvme|vd|hd)' | grep -v "^$BOOT_DEVICE " | head -10)
+    else
+        DISKS=$(lsblk -dno NAME,SIZE,MODEL | grep -E '^(sd|nvme|vd|hd)' | head -10)
+    fi
 
     if [ -z "$DISKS" ]; then
-        error "No suitable disks found"
+        error "No suitable disks found for installation"
+        if [ -n "$BOOT_DEVICE" ]; then
+            error "Only boot device /dev/$BOOT_DEVICE detected - cannot install to boot device"
+        fi
         exit 1
     fi
 
@@ -493,7 +536,7 @@ The installer will now exit." 10 50
     # Confirm selection
     DISK_INFO=$(echo "$DISKS" | grep "^$SELECTED_DISK")
 
-    if ! show_dialog --yesno "⚠️  FINAL WARNING ⚠️
+    if ! show_dialog --yesno "!!! FINAL WARNING !!!
 
 You selected: $DISK_INFO
 
@@ -573,6 +616,29 @@ This reduces the number of passwords you need to remember." 10 60
 create_archinstall_config() {
     log "Creating archinstall configuration..."
 
+    # Hash passwords for security (using yescrypt like Arch Linux)
+    log "Hashing passwords..."
+    HASHED_PASSWORD=$(hash_password "$PASSWORD")
+    HASHED_ROOT_PASSWORD=$(hash_password "$ROOT_PASSWORD")
+
+    # Calculate dynamic partition sizes based on selected disk
+    DISK_SIZE_BYTES=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
+
+    # Boot partition: 1GB (1073741824 bytes)
+    BOOT_SIZE_BYTES=1073741824
+
+    # Root partition: remaining space (total - boot - 1MB for GPT)
+    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - BOOT_SIZE_BYTES - 1048576))
+
+    # Start positions (in sectors, 512 bytes each)
+    BOOT_START_SECTOR=34  # Standard GPT start
+    ROOT_START_SECTOR=$(((BOOT_SIZE_BYTES / 512) + BOOT_START_SECTOR))
+
+    # Generate unique partition IDs
+    BOOT_ID=$(uuidgen)
+    ROOT_ID=$(uuidgen)
+
+    # Create main configuration file
     cat > "$ARCHINSTALL_CONFIG" << EOF
 {
     "version": "3.0.8",
@@ -598,67 +664,67 @@ create_archinstall_config() {
                 "wipe": true,
                 "partitions": [
                     {
-                        "obj_id": "boot-partition",
-                        "status": "create",
-                        "type": "primary",
+                        "btrfs": [],
+                        "flags": ["Boot"],
+                        "fs_type": "fat32",
+                        "length": {
+                            "sector_size": null,
+                            "total_size": null,
+                            "unit": "B",
+                            "value": $BOOT_SIZE_BYTES
+                        },
+                        "mount_options": [],
+                        "mountpoint": "/boot",
+                        "obj_id": "$BOOT_ID",
                         "start": {
                             "sector_size": {
-                                "value": 512,
-                                "unit": "B"
+                                "sector_size": null,
+                                "total_size": null,
+                                "unit": "B",
+                                "value": 512
                             },
-                            "unit": "MiB",
-                            "value": 1
+                            "total_size": null,
+                            "unit": "sectors",
+                            "value": $BOOT_START_SECTOR
                         },
-                        "size": {
-                            "sector_size": {
-                                "value": 512,
-                                "unit": "B"
-                            },
-                            "unit": "GiB",
-                            "value": 1
-                        },
-                        "fs_type": "fat32",
-                        "mountpoint": "/boot",
-                        "mount_options": [],
-                        "flags": ["boot"],
-                        "btrfs": []
+                        "status": "create",
+                        "type": "primary"
                     },
                     {
-                        "obj_id": "root-partition",
-                        "status": "create",
-                        "type": "primary",
+                        "btrfs": [],
+                        "flags": [],
+                        "fs_type": "btrfs",
+                        "length": {
+                            "sector_size": null,
+                            "total_size": null,
+                            "unit": "B",
+                            "value": $ROOT_SIZE_BYTES
+                        },
+                        "mount_options": [],
+                        "mountpoint": "/",
+                        "obj_id": "$ROOT_ID",
                         "start": {
                             "sector_size": {
-                                "value": 512,
-                                "unit": "B"
+                                "sector_size": null,
+                                "total_size": null,
+                                "unit": "B",
+                                "value": 512
                             },
-                            "unit": "GiB",
-                            "value": 1
-                        },
-                        "size": {
-                            "sector_size": {
-                                "value": 512,
-                                "unit": "B"
-                            },
+                            "total_size": null,
                             "unit": "sectors",
-                            "value": -1
+                            "value": $ROOT_START_SECTOR
                         },
-                        "fs_type": "btrfs",
-                        "mountpoint": "/",
-                        "mount_options": [],
-                        "flags": [],
-                        "btrfs": []
+                        "status": "create",
+                        "type": "primary"
                     }
                 ]
             }
-        ],
-        "disk_encryption": {
-            "encryption_type": "luks",
-            "partitions": ["root-partition"],
-            "lvm_volumes": []
-        }
+        ]
     },
-    "encryption_password": "$LUKS_PASSWORD",
+    "disk_encryption": {
+        "encryption_type": "luks",
+        "partitions": ["$ROOT_ID"]
+    },
     "services": [],
     "custom_commands": [],
     "mirror_config": {
@@ -674,12 +740,7 @@ create_archinstall_config() {
 }
 EOF
 
-    # Hash passwords for security (using yescrypt like Arch Linux)
-    log "Hashing passwords..."
-    HASHED_PASSWORD=$(hash_password "$PASSWORD")
-    HASHED_ROOT_PASSWORD=$(hash_password "$ROOT_PASSWORD")
-
-    # Create credentials file with encrypted passwords and LUKS password
+    # Create separate credentials file
     cat > "$ARCHINSTALL_CREDS" << EOF
 {
     "users": [
@@ -689,7 +750,8 @@ EOF
             "sudo": true
         }
     ],
-    "root_enc_password": "$HASHED_ROOT_PASSWORD"
+    "root_enc_password": "$HASHED_ROOT_PASSWORD",
+    "encryption_password": "$LUKS_PASSWORD"
 }
 EOF
 
@@ -716,22 +778,54 @@ Please be patient..." 14 70
 
     # Validate configuration with dry-run first
     log "Validating archinstall configuration..."
-    if ! archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --dry-run 2>/tmp/archinstall-validation.log; then
+
+    # First check if config files exist and are readable
+    if [ ! -f "$ARCHINSTALL_CONFIG" ]; then
+        error "Config file not found: $ARCHINSTALL_CONFIG"
+        exit 1
+    fi
+
+    if [ ! -f "$ARCHINSTALL_CREDS" ]; then
+        error "Credentials file not found: $ARCHINSTALL_CREDS"
+        exit 1
+    fi
+
+    # Show what we're validating
+    log "Config file size: $(wc -c < "$ARCHINSTALL_CONFIG") bytes"
+    log "Creds file size: $(wc -c < "$ARCHINSTALL_CREDS") bytes"
+
+    # Capture both stdout and stderr for debugging
+    if ! archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --dry-run > /tmp/archinstall-validation.log 2>&1; then
         error "Configuration validation failed"
+
+        # Show detailed error information
+        echo "=== ARCHINSTALL VALIDATION ERROR ===" >&2
+        echo "Config file contents:" >&2
+        cat "$ARCHINSTALL_CONFIG" >&2
+        echo "" >&2
+        echo "Credentials file contents:" >&2
+        cat "$ARCHINSTALL_CREDS" >&2
+        echo "" >&2
+        echo "Validation output:" >&2
+        cat /tmp/archinstall-validation.log >&2
+        echo "===================================" >&2
+
         show_dialog --msgbox "Configuration Invalid
 
-The archinstall configuration is invalid and cannot be used.
-This indicates a bug in the installer.
+The archinstall configuration failed validation.
 
-Please check /tmp/archinstall-validation.log for details.
+ERROR DETAILS:
+$(cat /tmp/archinstall-validation.log | head -10)
 
-Press OK to exit." 10 60
+Check the terminal output for full details.
+
+Press OK to exit." 16 70
         exit 1
     fi
     success "Configuration validated successfully"
 
     # Run archinstall with our configuration and credentials
-    if archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --silent 2>/tmp/archinstall-error.log; then
+    if archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --silent > /tmp/archinstall-error.log 2>&1; then
         success "Arch Linux installation completed successfully"
     else
         error "Arch Linux installation failed"
