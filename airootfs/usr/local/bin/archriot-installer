@@ -660,9 +660,11 @@ create_archinstall_config() {
                     {
                         "btrfs": [],
                         "dev_path": null,
+                        "flags": ["boot", "esp"],
+                        "fs_type": "fat32",
+                        "mount_options": [],
+                        "mountpoint": "/boot",
                         "obj_id": "$BOOT_ID",
-                        "status": "create",
-                        "type": "primary",
                         "start": {
                             "sector_size": {
                                 "unit": "B",
@@ -679,10 +681,8 @@ create_archinstall_config() {
                             "unit": "GiB",
                             "value": 1
                         },
-                        "fs_type": "fat32",
-                        "mountpoint": "/boot",
-                        "mount_options": [],
-                        "flags": ["boot", "esp"]
+                        "status": "create",
+                        "type": "primary"
                     },
                     {
                         "btrfs": [
@@ -704,9 +704,11 @@ create_archinstall_config() {
                             }
                         ],
                         "dev_path": null,
+                        "flags": [],
+                        "fs_type": "btrfs",
+                        "mount_options": ["compress=zstd"],
+                        "mountpoint": null,
                         "obj_id": "$ROOT_ID",
-                        "status": "create",
-                        "type": "primary",
                         "start": {
                             "sector_size": {
                                 "unit": "B",
@@ -723,10 +725,8 @@ create_archinstall_config() {
                             "unit": "B",
                             "value": $ROOT_SIZE_BYTES
                         },
-                        "fs_type": "btrfs",
-                        "mountpoint": null,
-                        "mount_options": ["compress=zstd"],
-                        "flags": []
+                        "status": "create",
+                        "type": "primary"
                     }
                 ],
                 "wipe": true
