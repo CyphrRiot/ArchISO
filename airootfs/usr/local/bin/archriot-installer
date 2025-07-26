@@ -658,23 +658,9 @@ create_archinstall_config() {
                 "device": "$SELECTED_DISK",
                 "partitions": [
                     {
-                        "btrfs": [],
-                        "flags": [
-                            "boot",
-                            "esp"
-                        ],
-                        "fs_type": "fat32",
-                        "mount_options": [],
-                        "mountpoint": "/boot",
                         "obj_id": "$BOOT_ID",
-                        "size": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "GiB",
-                            "value": 1
-                        },
+                        "status": "create",
+                        "type": "primary",
                         "start": {
                             "sector_size": {
                                 "unit": "B",
@@ -683,8 +669,19 @@ create_archinstall_config() {
                             "unit": "B",
                             "value": 2097152
                         },
-                        "status": "create",
-                        "type": "primary"
+                        "size": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "GiB",
+                            "value": 1
+                        },
+                        "fs_type": "fat32",
+                        "mountpoint": "/boot",
+                        "mount_options": [],
+                        "flags": ["boot", "esp"],
+                        "btrfs": []
                     },
                     {
                         "btrfs": [
@@ -705,21 +702,9 @@ create_archinstall_config() {
                                 "name": "@pkg"
                             }
                         ],
-                        "flags": [],
-                        "fs_type": "btrfs",
-                        "mount_options": [
-                            "compress=zstd"
-                        ],
-                        "mountpoint": "/",
                         "obj_id": "$ROOT_ID",
-                        "size": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "B",
-                            "value": $ROOT_SIZE_BYTES
-                        },
+                        "status": "create",
+                        "type": "primary",
                         "start": {
                             "sector_size": {
                                 "unit": "B",
@@ -728,8 +713,18 @@ create_archinstall_config() {
                             "unit": "B",
                             "value": 1075838976
                         },
-                        "status": "create",
-                        "type": "primary"
+                        "size": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": $ROOT_SIZE_BYTES
+                        },
+                        "fs_type": "btrfs",
+                        "mountpoint": "/",
+                        "mount_options": ["compress=zstd"],
+                        "flags": []
                     }
                 ],
                 "wipe": true
