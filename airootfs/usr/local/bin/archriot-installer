@@ -825,7 +825,7 @@ Please be patient..." 14 70
     log "Creds file size: $(wc -c < "$ARCHINSTALL_CREDS") bytes"
 
     # Capture both stdout and stderr for debugging
-    if ! archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --dry-run > /tmp/archinstall-validation.log 2>&1; then
+    if ! archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --dry-run --silent > /tmp/archinstall-validation.log 2>&1; then
         error "Configuration validation failed"
 
         # Show detailed error information
