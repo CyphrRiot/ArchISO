@@ -3,6 +3,7 @@ build/
 build/**/*
 *.iso
 *.img
+isos/*
 
 # NO LOGS!!!
 logs/*
