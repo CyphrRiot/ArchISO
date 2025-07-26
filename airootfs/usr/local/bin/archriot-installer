@@ -658,6 +658,8 @@ create_archinstall_config() {
                 "device": "$SELECTED_DISK",
                 "partitions": [
                     {
+                        "btrfs": [],
+                        "dev_path": null,
                         "obj_id": "$BOOT_ID",
                         "status": "create",
                         "type": "primary",
@@ -680,8 +682,7 @@ create_archinstall_config() {
                         "fs_type": "fat32",
                         "mountpoint": "/boot",
                         "mount_options": [],
-                        "flags": ["boot", "esp"],
-                        "btrfs": []
+                        "flags": ["boot", "esp"]
                     },
                     {
                         "btrfs": [
@@ -702,6 +703,7 @@ create_archinstall_config() {
                                 "name": "@pkg"
                             }
                         ],
+                        "dev_path": null,
                         "obj_id": "$ROOT_ID",
                         "status": "create",
                         "type": "primary",
@@ -722,7 +724,7 @@ create_archinstall_config() {
                             "value": $ROOT_SIZE_BYTES
                         },
                         "fs_type": "btrfs",
-                        "mountpoint": "/",
+                        "mountpoint": null,
                         "mount_options": ["compress=zstd"],
                         "flags": []
                     }
@@ -756,6 +758,9 @@ create_archinstall_config() {
     },
     "ntp": true,
     "packages": [
+
+        "wget", "curl", "git", "base-devel", "networkmanager", "iwd"
+    ],
         "wget", "curl", "git", "base-devel", "networkmanager", "iwd"
     ],
     "parallel_downloads": 0,
