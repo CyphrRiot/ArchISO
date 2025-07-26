@@ -632,15 +632,8 @@ create_archinstall_config() {
     # Calculate dynamic partition sizes based on selected disk
     DISK_SIZE_BYTES=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
 
-    # Boot partition: 1GB (1073741824 bytes)
-    BOOT_SIZE_BYTES=1073741824
-
-    # Root partition: remaining space (total - boot - 1MB for GPT)
-    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - BOOT_SIZE_BYTES - 1048576))
-
-    # Start positions (in sectors, 512 bytes each)
-    BOOT_START_SECTOR=34  # Standard GPT start
-    ROOT_START_SECTOR=$(((BOOT_SIZE_BYTES / 512) + BOOT_START_SECTOR))
+    # Root partition size: total disk - root start - GPT backup header space (32MB)
+    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - 1075838976 - 33554432))
 
     # Generate unique partition IDs
     BOOT_ID=$(uuidgen)
@@ -666,27 +659,29 @@ create_archinstall_config() {
                 "partitions": [
                     {
                         "btrfs": [],
-                        "flags": ["Boot"],
+                        "flags": [
+                            "boot",
+                            "esp"
+                        ],
                         "fs_type": "fat32",
-                        "size": {
-                            "sector_size": null,
-                            "total_size": null,
-                            "unit": "B",
-                            "value": $BOOT_SIZE_BYTES
-                        },
                         "mount_options": [],
                         "mountpoint": "/boot",
                         "obj_id": "$BOOT_ID",
-                        "start": {
+                        "size": {
                             "sector_size": {
-                                "sector_size": null,
-                                "total_size": null,
                                 "unit": "B",
                                 "value": 512
                             },
-                            "total_size": null,
-                            "unit": "sectors",
-                            "value": $BOOT_START_SECTOR
+                            "unit": "GiB",
+                            "value": 1
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": 2097152
                         },
                         "status": "create",
                         "type": "primary"
@@ -712,27 +707,26 @@ create_archinstall_config() {
                         ],
                         "flags": [],
                         "fs_type": "btrfs",
-                        "size": {
-                            "sector_size": null,
-                            "total_size": null,
-                            "unit": "B",
-                            "value": $ROOT_SIZE_BYTES
-                        },
                         "mount_options": [
                             "compress=zstd"
                         ],
-                        "mountpoint": "/",
+                        "mountpoint": null,
                         "obj_id": "$ROOT_ID",
-                        "start": {
+                        "size": {
                             "sector_size": {
-                                "sector_size": null,
-                                "total_size": null,
                                 "unit": "B",
                                 "value": 512
                             },
-                            "total_size": null,
-                            "unit": "sectors",
-                            "value": $ROOT_START_SECTOR
+                            "unit": "B",
+                            "value": $ROOT_SIZE_BYTES
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": 1075838976
                         },
                         "status": "create",
                         "type": "primary"
