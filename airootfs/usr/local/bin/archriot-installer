@@ -632,18 +632,18 @@ setup_luks_encryption() {
     log "Setting up LUKS encryption on $SELECTED_DISK"
 
     # Unmount any existing mounts
-    sudo umount -f "${SELECTED_DISK}p1" 2>/dev/null || true
-    sudo umount -f "${SELECTED_DISK}p2" 2>/dev/null || true
-    sudo umount -f "${SELECTED_DISK}1" 2>/dev/null || true
-    sudo umount -f "${SELECTED_DISK}2" 2>/dev/null || true
-    sudo cryptsetup close luks_root 2>/dev/null || true
+    umount -f "${SELECTED_DISK}p1" 2>/dev/null || true
+    umount -f "${SELECTED_DISK}p2" 2>/dev/null || true
+    umount -f "${SELECTED_DISK}1" 2>/dev/null || true
+    umount -f "${SELECTED_DISK}2" 2>/dev/null || true
+    cryptsetup close luks_root 2>/dev/null || true
 
     # Create partitions
     log "Creating partitions..."
-    sudo parted "$SELECTED_DISK" --script mklabel gpt
-    sudo parted "$SELECTED_DISK" --script mkpart primary fat32 2MiB 1026MiB
-    sudo parted "$SELECTED_DISK" --script set 1 esp on
-    sudo parted "$SELECTED_DISK" --script mkpart primary 1026MiB -128MiB
+    parted "$SELECTED_DISK" --script mklabel gpt
+    parted "$SELECTED_DISK" --script mkpart primary fat32 2MiB 1026MiB
+    parted "$SELECTED_DISK" --script set 1 esp on
+    parted "$SELECTED_DISK" --script mkpart primary 1026MiB -128MiB
 
     # Determine partition names
     if [[ "$SELECTED_DISK" =~ nvme ]]; then
@@ -659,42 +659,42 @@ setup_luks_encryption() {
 
     # Wait for partitions to be recognized
     sleep 2
-    sudo partprobe "$SELECTED_DISK"
+    partprobe "$SELECTED_DISK"
     sleep 2
 
     # Format boot partition
     log "Formatting boot partition..."
-    sudo mkfs.fat -F32 "$BOOT_PARTITION"
+    mkfs.fat -F32 "$BOOT_PARTITION"
 
     # Setup LUKS on root partition
     log "Setting up LUKS encryption..."
-    echo "$LUKS_PASSWORD" | sudo cryptsetup luksFormat --pbkdf pbkdf2 "$ROOT_PARTITION" -
+    echo "$LUKS_PASSWORD" | cryptsetup luksFormat --pbkdf pbkdf2 "$ROOT_PARTITION" -
 
     # Open LUKS container
     log "Opening LUKS container..."
-    echo "$LUKS_PASSWORD" | sudo cryptsetup open "$ROOT_PARTITION" luks_root -
+    echo "$LUKS_PASSWORD" | cryptsetup open "$ROOT_PARTITION" luks_root -
 
     # Format encrypted partition with BTRFS
     log "Formatting encrypted partition with BTRFS..."
-    sudo mkfs.btrfs -f /dev/mapper/luks_root
+    mkfs.btrfs -f /dev/mapper/luks_root
 
     # Create BTRFS subvolumes
     log "Creating BTRFS subvolumes..."
-    sudo mount /dev/mapper/luks_root /mnt
-    sudo btrfs subvolume create /mnt/@
-    sudo btrfs subvolume create /mnt/@home
-    sudo btrfs subvolume create /mnt/@log
-    sudo btrfs subvolume create /mnt/@pkg
-    sudo umount /mnt
+    mount /dev/mapper/luks_root /mnt
+    btrfs subvolume create /mnt/@
+    btrfs subvolume create /mnt/@home
+    btrfs subvolume create /mnt/@log
+    btrfs subvolume create /mnt/@pkg
+    umount /mnt
 
     # Mount with proper subvolumes
     log "Mounting filesystems..."
-    sudo mount -o compress=zstd,subvol=@ /dev/mapper/luks_root /mnt
-    sudo mkdir -p /mnt/{boot,home,var/log,var/cache/pacman/pkg}
-    sudo mount "$BOOT_PARTITION" /mnt/boot
-    sudo mount -o compress=zstd,subvol=@home /dev/mapper/luks_root /mnt/home
-    sudo mount -o compress=zstd,subvol=@log /dev/mapper/luks_root /mnt/var/log
-    sudo mount -o compress=zstd,subvol=@pkg /dev/mapper/luks_root /mnt/var/cache/pacman/pkg
+    mount -o compress=zstd,subvol=@ /dev/mapper/luks_root /mnt
+    mkdir -p /mnt/{boot,home,var/log,var/cache/pacman/pkg}
+    mount "$BOOT_PARTITION" /mnt/boot
+    mount -o compress=zstd,subvol=@home /dev/mapper/luks_root /mnt/home
+    mount -o compress=zstd,subvol=@log /dev/mapper/luks_root /mnt/var/log
+    mount -o compress=zstd,subvol=@pkg /dev/mapper/luks_root /mnt/var/cache/pacman/pkg
 
     success "LUKS encryption setup complete"
 }
@@ -727,11 +727,11 @@ This may take several minutes..." 8 50 &
 
     # Install base system using pacstrap
     log "Installing base system with pacstrap..."
-    if ! sudo pacstrap -c /mnt base linux linux-firmware btrfs-progs networkmanager systemd-boot cryptsetup > /tmp/pacstrap.log 2>&1; then
+    if ! pacstrap -c /mnt base linux linux-firmware btrfs-progs networkmanager systemd-boot cryptsetup > /tmp/pacstrap.log 2>&1; then
         error "Base system installation failed"
         # Cleanup on failure
-        sudo umount -R /mnt 2>/dev/null || true
-        sudo cryptsetup close luks_root 2>/dev/null || true
+        umount -R /mnt 2>/dev/null || true
+        cryptsetup close luks_root 2>/dev/null || true
         show_dialog --msgbox "Installation Failed
 
 Base system installation failed during pacstrap.
@@ -745,10 +745,10 @@ The system will exit to allow you to investigate." 12 60
 
     # Generate fstab
     log "Generating fstab..."
-    if ! sudo genfstab -U /mnt >> /mnt/etc/fstab; then
+    if ! genfstab -U /mnt >> /mnt/etc/fstab; then
         error "Failed to generate fstab"
-        sudo umount -R /mnt 2>/dev/null || true
-        sudo cryptsetup close luks_root 2>/dev/null || true
+        umount -R /mnt 2>/dev/null || true
+        cryptsetup close luks_root 2>/dev/null || true
         exit 1
     fi
     success "fstab generated successfully"
@@ -758,32 +758,32 @@ The system will exit to allow you to investigate." 12 60
 
     # Set timezone
     log "Configuring timezone..."
-    if ! sudo arch-chroot /mnt ln -sf /usr/share/zoneinfo/$SELECTED_TIMEZONE /etc/localtime; then
+    if ! arch-chroot /mnt ln -sf /usr/share/zoneinfo/$SELECTED_TIMEZONE /etc/localtime; then
         error "Failed to set timezone"
         exit 1
     fi
-    sudo arch-chroot /mnt hwclock --systohc || warn "Hardware clock sync failed (non-critical)"
+    arch-chroot /mnt hwclock --systohc || warn "Hardware clock sync failed (non-critical)"
 
     # Set locale
     log "Configuring locale..."
-    echo "en_US.UTF-8 UTF-8" | sudo tee /mnt/etc/locale.gen > /dev/null
-    if ! sudo arch-chroot /mnt locale-gen; then
+    echo "en_US.UTF-8 UTF-8" | tee /mnt/etc/locale.gen > /dev/null
+    if ! arch-chroot /mnt locale-gen; then
         error "Failed to generate locale"
         exit 1
     fi
-    echo "LANG=en_US.UTF-8" | sudo tee /mnt/etc/locale.conf > /dev/null
+    echo "LANG=en_US.UTF-8" | tee /mnt/etc/locale.conf > /dev/null
 
     # Set keyboard layout
     log "Setting keyboard layout..."
-    echo "KEYMAP=$SELECTED_KEYBOARD" | sudo tee /mnt/etc/vconsole.conf > /dev/null
+    echo "KEYMAP=$SELECTED_KEYBOARD" | tee /mnt/etc/vconsole.conf > /dev/null
 
     # Set hostname
     log "Setting hostname..."
-    echo "$HOSTNAME" | sudo tee /mnt/etc/hostname > /dev/null
+    echo "$HOSTNAME" | tee /mnt/etc/hostname > /dev/null
     success "System configuration completed"
 
     # Configure hosts file
-    cat << EOF | sudo tee /mnt/etc/hosts > /dev/null
+    cat << EOF | tee /mnt/etc/hosts > /dev/null
 127.0.0.1	localhost
 ::1		localhost
 127.0.1.1	$HOSTNAME.localdomain	$HOSTNAME
@@ -793,31 +793,31 @@ EOF
     log "Configuring LUKS encryption..."
 
     # Add encrypt hook to mkinitcpio.conf
-    sudo sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf keyboard block encrypt filesystems fsck)/' /mnt/etc/mkinitcpio.conf
+    sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf keyboard block encrypt filesystems fsck)/' /mnt/etc/mkinitcpio.conf
 
     # Get LUKS UUID
-    LUKS_UUID=$(sudo blkid -s UUID -o value "$ROOT_PARTITION")
-    ROOT_FS_UUID=$(sudo blkid -s UUID -o value /dev/mapper/luks_root)
+    LUKS_UUID=$(blkid -s UUID -o value "$ROOT_PARTITION")
+    ROOT_FS_UUID=$(blkid -s UUID -o value /dev/mapper/luks_root)
 
     # Install and configure systemd-boot
     log "Installing systemd-boot..."
-    if ! sudo arch-chroot /mnt bootctl install; then
+    if ! arch-chroot /mnt bootctl install; then
         error "Failed to install systemd-boot"
         exit 1
     fi
     success "systemd-boot installed successfully"
 
     # Configure systemd-boot for LUKS
-    sudo mkdir -p /mnt/boot/loader/entries
+    mkdir -p /mnt/boot/loader/entries
 
-    cat << EOF | sudo tee /mnt/boot/loader/loader.conf > /dev/null
+    cat << EOF | tee /mnt/boot/loader/loader.conf > /dev/null
 default arch-luks.conf
 timeout 4
 console-mode max
 editor no
 EOF
 
-    cat << EOF | sudo tee /mnt/boot/loader/entries/arch-luks.conf > /dev/null
+    cat << EOF | tee /mnt/boot/loader/entries/arch-luks.conf > /dev/null
 title   Arch Linux (LUKS)
 linux   /vmlinuz-linux
 initrd  /initramfs-linux.img
@@ -826,41 +826,41 @@ EOF
 
     # Create user account
     log "Creating user account..."
-    if ! sudo arch-chroot /mnt useradd -m -G wheel,audio,video,optical,storage -s /bin/bash "$USERNAME"; then
+    if ! arch-chroot /mnt useradd -m -G wheel,audio,video,optical,storage -s /bin/bash "$USERNAME"; then
         error "Failed to create user account"
         exit 1
     fi
 
     # Set passwords
     log "Setting passwords..."
-    if ! echo "$USERNAME:$PASSWORD" | sudo chpasswd -R /mnt; then
+    if ! echo "$USERNAME:$PASSWORD" | chpasswd -R /mnt; then
         error "Failed to set user password"
         exit 1
     fi
-    if ! echo "root:$ROOT_PASSWORD" | sudo chpasswd -R /mnt; then
+    if ! echo "root:$ROOT_PASSWORD" | chpasswd -R /mnt; then
         error "Failed to set root password"
         exit 1
     fi
 
     # Enable sudo for wheel group
-    echo "%wheel ALL=(ALL:ALL) ALL" | sudo tee -a /mnt/etc/sudoers > /dev/null
+    echo "%wheel ALL=(ALL:ALL) ALL" | tee -a /mnt/etc/sudoers > /dev/null
 
     # Enable NetworkManager
     log "Enabling NetworkManager..."
-    if ! sudo arch-chroot /mnt systemctl enable NetworkManager; then
+    if ! arch-chroot /mnt systemctl enable NetworkManager; then
         warn "Failed to enable NetworkManager (may need manual setup)"
     fi
     success "User account and network configured"
 
     # Install additional packages
     log "Installing additional packages..."
-    sudo arch-chroot /mnt pacman -S --noconfirm wget curl git base-devel > /tmp/packages.log 2>&1 || true
+    arch-chroot /mnt pacman -S --noconfirm wget curl git base-devel > /tmp/packages.log 2>&1 || true
 
     # Copy cached packages to installed system
     log "Copying cached packages to installed system..."
     if [ -d /var/cache/pacman/pkg ] && [ "$(ls -A /var/cache/pacman/pkg 2>/dev/null)" ]; then
-        sudo mkdir -p /mnt/var/cache/pacman/pkg
-        sudo cp /var/cache/pacman/pkg/*.pkg.tar.* /mnt/var/cache/pacman/pkg/ 2>/dev/null || true
+        mkdir -p /mnt/var/cache/pacman/pkg
+        cp /var/cache/pacman/pkg/*.pkg.tar.* /mnt/var/cache/pacman/pkg/ 2>/dev/null || true
 
         PKG_COUNT=$(ls /mnt/var/cache/pacman/pkg/*.pkg.tar.* 2>/dev/null | wc -l)
         log "Copied $PKG_COUNT cached packages to installed system"
@@ -871,7 +871,7 @@ EOF
 
     # Regenerate initramfs
     log "Regenerating initramfs..."
-    if ! sudo arch-chroot /mnt mkinitcpio -P; then
+    if ! arch-chroot /mnt mkinitcpio -P; then
         error "Failed to regenerate initramfs"
         exit 1
     fi
@@ -897,19 +897,19 @@ EOF
     fi
 
     # Check that user account exists
-    if ! sudo arch-chroot /mnt id "$USERNAME" > /dev/null 2>&1; then
+    if ! arch-chroot /mnt id "$USERNAME" > /dev/null 2>&1; then
         error "User account '$USERNAME' not found - user creation failed"
         exit 1
     fi
 
     # Check that user is in wheel group
-    if ! sudo arch-chroot /mnt groups "$USERNAME" | grep -q wheel; then
+    if ! arch-chroot /mnt groups "$USERNAME" | grep -q wheel; then
         error "User '$USERNAME' not in wheel group - sudo access may not work"
         exit 1
     fi
 
     # Check that NetworkManager is enabled
-    if ! sudo arch-chroot /mnt systemctl is-enabled NetworkManager > /dev/null 2>&1; then
+    if ! arch-chroot /mnt systemctl is-enabled NetworkManager > /dev/null 2>&1; then
         warn "NetworkManager not enabled - network may not work after reboot"
     fi
 
@@ -941,8 +941,8 @@ EOF
     unset LUKS_PASSWORD
 
     # Clear any temporary files containing sensitive data
-    sudo shred -vfz -n 3 /tmp/pacstrap.log 2>/dev/null || true
-    sudo shred -vfz -n 3 /tmp/packages.log 2>/dev/null || true
+    shred -vfz -n 3 /tmp/pacstrap.log 2>/dev/null || true
+    shred -vfz -n 3 /tmp/packages.log 2>/dev/null || true
     rm -f /tmp/input_result /tmp/password_result /tmp/menu_result 2>/dev/null || true
 
     # Clear bash history to remove any accidentally typed passwords
@@ -957,17 +957,17 @@ EOF
     sync
 
     # Unmount all mounted filesystems
-    sudo umount -R /mnt 2>/dev/null || {
+    umount -R /mnt 2>/dev/null || {
         warn "Some filesystems may still be busy, forcing unmount..."
-        sudo umount -f /mnt/var/cache/pacman/pkg 2>/dev/null || true
-        sudo umount -f /mnt/var/log 2>/dev/null || true
-        sudo umount -f /mnt/home 2>/dev/null || true
-        sudo umount -f /mnt/boot 2>/dev/null || true
-        sudo umount -f /mnt 2>/dev/null || true
+        umount -f /mnt/var/cache/pacman/pkg 2>/dev/null || true
+        umount -f /mnt/var/log 2>/dev/null || true
+        umount -f /mnt/home 2>/dev/null || true
+        umount -f /mnt/boot 2>/dev/null || true
+        umount -f /mnt 2>/dev/null || true
     }
 
     # Close LUKS container
-    sudo cryptsetup close luks_root 2>/dev/null || true
+    cryptsetup close luks_root 2>/dev/null || true
 
     success "Cleanup completed - system ready for reboot"
     success "Manual Arch Linux installation completed successfully"
@@ -986,7 +986,7 @@ This will install the ArchRiot desktop environment, themes, and all customizatio
 Press OK to continue..." 16 75
 
     # Create a reminder file on the installed system
-    cat << 'EOF' | sudo tee /mnt/home/$USERNAME/.archriot-setup.sh > /dev/null
+    cat << 'EOF' | tee /mnt/home/$USERNAME/.archriot-setup.sh > /dev/null
 #!/bin/bash
 echo ""
 echo "🚀 Welcome to ArchRiot!"
@@ -995,14 +995,14 @@ echo "To complete your ArchRiot setup, run:"
 echo "curl -fsSL https://ArchRiot.org/setup.sh | bash"
 echo ""
 EOF
-    sudo chmod +x /mnt/home/$USERNAME/.archriot-setup.sh
-    sudo chown 1000:1000 /mnt/home/$USERNAME/.archriot-setup.sh
+    chmod +x /mnt/home/$USERNAME/.archriot-setup.sh
+    chown 1000:1000 /mnt/home/$USERNAME/.archriot-setup.sh
 
     # Add to user's .bashrc
-    echo "" | sudo tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
-    echo "# ArchRiot setup reminder" | sudo tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
-    echo "if [ -f ~/.archriot-setup.sh ]; then ~/.archriot-setup.sh; fi" | sudo tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
-    sudo chown 1000:1000 /mnt/home/$USERNAME/.bashrc
+    echo "" | tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
+    echo "# ArchRiot setup reminder" | tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
+    echo "if [ -f ~/.archriot-setup.sh ]; then ~/.archriot-setup.sh; fi" | tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
+    chown 1000:1000 /mnt/home/$USERNAME/.bashrc
 }
 
 # Install ArchRiot welcome message for first boot
