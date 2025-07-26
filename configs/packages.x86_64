@@ -13,6 +13,7 @@ linux-firmware-marvell
 # === INSTALL TOOLS ===
 # Required for manual installation
 arch-install-scripts
+archinstall
 
 # === BOOT ESSENTIALS ===
 # Required for system boot
