@@ -1080,6 +1080,25 @@ The system will now reboot. After reboot:
 Note: The first boot may take a few extra moments to initialize services." 14 70
 
     success "ArchRiot installation completed successfully!"
+
+    # Show post-install ArchRiot setup instructions
+    show_dialog --msgbox "🎉 Installation Complete! 🎉
+
+Base Arch Linux system has been installed successfully!
+
+IMPORTANT - Complete Your ArchRiot Setup:
+
+After the system reboots and you log in, run this command to finish setting up ArchRiot:
+
+curl -fsSL https://ArchRiot.org/setup.sh | bash
+
+This will install:
+• Hyprland desktop environment
+• All ArchRiot configurations
+• Essential applications and themes
+
+Press OK to reboot and complete your ArchRiot installation!" 18 75
+
     log "System will reboot in 10 seconds..."
 
     # Clean up sensitive files securely
