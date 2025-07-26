@@ -747,12 +747,7 @@ create_archinstall_config() {
         "sys_enc": "UTF-8",
         "sys_lang": "en_US.UTF-8"
     },
-    "mirror_config": {
-        "custom_repositories": [],
-        "custom_servers": [],
-        "mirror_regions": {},
-        "optional_repositories": []
-    },
+
     "network_config": {
         "type": "iso"
     },
