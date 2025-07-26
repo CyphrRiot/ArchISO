@@ -433,7 +433,7 @@ Retry WiFi setup?" 12 60; then
     # Show connection timing warning
     show_dialog --msgbox " -=- Network Connection -=-
 
-Please wait at least 10 seconds for the network connection to establish after entering the password.
+Please wait at least 10 seconds for the network connection after pressing ENTER (for OK).
 
 The connection process may take some time to complete." 10 60
 
@@ -758,9 +758,6 @@ create_archinstall_config() {
     },
     "ntp": true,
     "packages": [
-
-        "wget", "curl", "git", "base-devel", "networkmanager", "iwd"
-    ],
         "wget", "curl", "git", "base-devel", "networkmanager", "iwd"
     ],
     "parallel_downloads": 0,
