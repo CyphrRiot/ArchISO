@@ -633,7 +633,7 @@ create_archinstall_config() {
     DISK_SIZE_BYTES=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
 
     # Root partition size: total disk - root start - GPT backup header space (32MB)
-    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - 1075838976 - 33554432))
+    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - 1074790400 - 33554432))
 
     # Generate unique partition IDs
     BOOT_ID=$(uuidgen)
