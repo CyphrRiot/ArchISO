@@ -683,6 +683,12 @@ else
     fi
 fi
 
+# Generate SHA256 checksum
+echo -e "${BLUE}🔐 Generating SHA256 checksum...${NC}"
+cd "$(dirname "$OUTPUT_ISO")"
+sha256sum "$(basename "$OUTPUT_ISO")" > "archriot-2025.sha256"
+echo -e "${GREEN}✅ SHA256 checksum generated: archriot-2025.sha256${NC}"
+
 echo
 echo -e "${GREEN}🎉🎉🎉 ArchRiot ISO BUILD COMPLETE! 🎉🎉🎉${NC}"
 echo -e "${GREEN}================================================${NC}"
@@ -696,5 +702,6 @@ echo -e "${GREEN}✅ Ready for Hardware Testing${NC}"
 echo
 echo -e "${GREEN}🚀 Your ArchRiot installation ISO is ready!${NC}"
 echo -e "${GREEN}📀 Location: $OUTPUT_ISO${NC}"
+echo -e "${GREEN}🔐 Checksum: $(dirname "$OUTPUT_ISO")/archriot-2025.sha256${NC}"
 echo -e "${GREEN}🔥 Boot it up and install ArchRiot in minutes!${NC}"
 echo
