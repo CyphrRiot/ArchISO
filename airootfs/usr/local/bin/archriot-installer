@@ -710,7 +710,7 @@ create_archinstall_config() {
                         "mount_options": [
                             "compress=zstd"
                         ],
-                        "mountpoint": null,
+                        "mountpoint": "/",
                         "obj_id": "$ROOT_ID",
                         "size": {
                             "sector_size": {
