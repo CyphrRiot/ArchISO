@@ -668,7 +668,7 @@ create_archinstall_config() {
                         "btrfs": [],
                         "flags": ["Boot"],
                         "fs_type": "fat32",
-                        "length": {
+                        "size": {
                             "sector_size": null,
                             "total_size": null,
                             "unit": "B",
@@ -712,7 +712,7 @@ create_archinstall_config() {
                         ],
                         "flags": [],
                         "fs_type": "btrfs",
-                        "length": {
+                        "size": {
                             "sector_size": null,
                             "total_size": null,
                             "unit": "B",
