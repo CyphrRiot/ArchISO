@@ -665,20 +665,20 @@ create_archinstall_config() {
                         "mount_options": [],
                         "mountpoint": "/boot",
                         "obj_id": "$BOOT_ID",
-                        "start": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "B",
-                            "value": 2097152
-                        },
                         "size": {
                             "sector_size": {
                                 "unit": "B",
                                 "value": 512
                             },
                             "unit": "GiB",
+                            "value": 1
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "MiB",
                             "value": 1
                         },
                         "status": "create",
@@ -709,14 +709,6 @@ create_archinstall_config() {
                         "mount_options": ["compress=zstd"],
                         "mountpoint": null,
                         "obj_id": "$ROOT_ID",
-                        "start": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "B",
-                            "value": 1075838976
-                        },
                         "size": {
                             "sector_size": {
                                 "unit": "B",
@@ -724,6 +716,14 @@ create_archinstall_config() {
                             },
                             "unit": "B",
                             "value": $ROOT_SIZE_BYTES
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": 1074790400
                         },
                         "status": "create",
                         "type": "primary"
