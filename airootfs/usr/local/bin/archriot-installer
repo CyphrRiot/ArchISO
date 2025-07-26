@@ -31,8 +31,7 @@ HOSTNAME=""
 WIFI_INTERFACE=""
 SELECTED_TIMEZONE=""
 SELECTED_KEYBOARD=""
-ARCHINSTALL_CONFIG="/tmp/archriot-config.json"
-ARCHINSTALL_CREDS="/tmp/archriot-creds.json"
+# Manual installation - no archinstall needed
 
 # Logging functions with Tokyo Night styling
 log() {
@@ -549,19 +548,6 @@ The installer will now exit." 10 50
     fi
 
     # Confirm selection
-    DISK_INFO=$(echo "$DISKS" | grep "^$SELECTED_DISK")
-
-    if ! show_dialog --yesno "!!! FINAL WARNING !!!
-
-You selected: $DISK_INFO
-
-This disk will be COMPLETELY ERASED and partitioned for ArchRiot installation.
-
-Are you absolutely sure you want to continue?" 12 64; then
-        log "Disk selection cancelled by user"
-        exit 0
-    fi
-
     SELECTED_DISK="/dev/$SELECTED_DISK"
     success "Selected disk: $SELECTED_DISK"
 }
@@ -625,260 +611,398 @@ This reduces the number of passwords you need to remember." 10 60
     success "User configuration complete"
     log "Hostname: $HOSTNAME"
     log "Username: $USERNAME"
+success "User information collected"
+
+# Show final warning after all user input is collected
+DISK_INFO=$(lsblk -dno NAME,SIZE,MODEL "$SELECTED_DISK" | head -1)
+if ! show_dialog --yesno "!!! FINAL WARNING !!!
+
+You selected: $DISK_INFO
+
+This disk will be COMPLETELY ERASED and partitioned for ArchRiot installation.
+
+All configuration is complete. Are you absolutely sure you want to continue?" 14 70; then
+    log "Installation cancelled by user at final confirmation"
+    exit 0
+fi
 }
 
-# Create archinstall configuration
-create_archinstall_config() {
-    log "Creating archinstall configuration..."
+# Setup LUKS encryption manually
+setup_luks_encryption() {
+    log "Setting up LUKS encryption on $SELECTED_DISK"
 
-    # Hash passwords for security (using yescrypt like Arch Linux)
-    log "Hashing passwords..."
-    HASHED_PASSWORD=$(hash_password "$PASSWORD")
-    HASHED_ROOT_PASSWORD=$(hash_password "$ROOT_PASSWORD")
+    # Unmount any existing mounts
+    sudo umount -f "${SELECTED_DISK}p1" 2>/dev/null || true
+    sudo umount -f "${SELECTED_DISK}p2" 2>/dev/null || true
+    sudo umount -f "${SELECTED_DISK}1" 2>/dev/null || true
+    sudo umount -f "${SELECTED_DISK}2" 2>/dev/null || true
+    sudo cryptsetup close luks_root 2>/dev/null || true
 
-    # Calculate dynamic partition sizes based on selected disk
-    DISK_SIZE_BYTES=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
+    # Create partitions
+    log "Creating partitions..."
+    sudo parted "$SELECTED_DISK" --script mklabel gpt
+    sudo parted "$SELECTED_DISK" --script mkpart primary fat32 2MiB 1026MiB
+    sudo parted "$SELECTED_DISK" --script set 1 esp on
+    sudo parted "$SELECTED_DISK" --script mkpart primary 1026MiB -128MiB
 
-    # Root partition size: total disk - root start - GPT backup header space (32MB)
-    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - 1075838976 - 33554432))
+    # Determine partition names
+    if [[ "$SELECTED_DISK" =~ nvme ]]; then
+        BOOT_PARTITION="${SELECTED_DISK}p1"
+        ROOT_PARTITION="${SELECTED_DISK}p2"
+    else
+        BOOT_PARTITION="${SELECTED_DISK}1"
+        ROOT_PARTITION="${SELECTED_DISK}2"
+    fi
 
-    # Generate unique partition IDs
-    BOOT_ID=$(uuidgen)
-    ROOT_ID=$(uuidgen)
+    log "Boot partition: $BOOT_PARTITION"
+    log "Root partition: $ROOT_PARTITION"
 
-    # Create main configuration file
-    cat > "$ARCHINSTALL_CONFIG" << EOF
-{
-    "archinstall-language": "English",
-    "audio_config": {
-        "audio": "pipewire"
-    },
-    "bootloader": "Systemd-boot",
-    "custom_commands": [],
-    "disk_config": {
-        "btrfs_options": {
-            "snapshot_config": null
-        },
-        "config_type": "default_layout",
-        "device_modifications": [
-            {
-                "device": "$SELECTED_DISK",
-                "partitions": [
-                    {
-                        "btrfs": [],
-                        "dev_path": null,
-                        "flags": [
-                            "boot",
-                            "esp"
-                        ],
-                        "fs_type": "fat32",
-                        "mount_options": [],
-                        "mountpoint": "/boot",
-                        "obj_id": "$BOOT_ID",
-                        "size": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "GiB",
-                            "value": 1
-                        },
-                        "start": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "B",
-                            "value": 2097152
-                        },
-                        "status": "create",
-                        "type": "primary"
-                    },
-                    {
-                        "btrfs": [
-                            {
-                                "mountpoint": "/",
-                                "name": "@"
-                            },
-                            {
-                                "mountpoint": "/home",
-                                "name": "@home"
-                            },
-                            {
-                                "mountpoint": "/var/log",
-                                "name": "@log"
-                            },
-                            {
-                                "mountpoint": "/var/cache/pacman/pkg",
-                                "name": "@pkg"
-                            }
-                        ],
-                        "dev_path": null,
-                        "flags": [],
-                        "fs_type": "btrfs",
-                        "mount_options": [
-                            "compress=zstd"
-                        ],
-                        "mountpoint": null,
-                        "obj_id": "$ROOT_ID",
-                        "size": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "B",
-                            "value": $ROOT_SIZE_BYTES
-                        },
-                        "start": {
-                            "sector_size": {
-                                "unit": "B",
-                                "value": 512
-                            },
-                            "unit": "B",
-                            "value": 1075838976
-                        },
-                        "status": "create",
-                        "type": "primary"
-                    }
-                ],
-                "wipe": true
-            }
-        ]
-    },
-    "hostname": "$HOSTNAME",
-    "kernels": [
-        "linux"
-    ],
-    "locale_config": {
-        "kb_layout": "$SELECTED_KEYBOARD",
-        "sys_enc": "UTF-8",
-        "sys_lang": "en_US.UTF-8"
-    },
-    "mirror_config": {
-        "custom_repositories": [],
-        "custom_servers": [],
-        "mirror_regions": {
-            "United States": []
-        },
-        "optional_repositories": []
-    },
-    "network_config": {
-        "type": "iso"
-    },
-    "ntp": true,
-    "packages": [
-        "wget", "curl", "git", "base-devel", "networkmanager", "iwd"
-    ],
-    "parallel_downloads": 0,
-    "services": [],
-    "swap": false,
-    "timezone": "$SELECTED_TIMEZONE",
-    "version": null
-}
-EOF
+    # Wait for partitions to be recognized
+    sleep 2
+    sudo partprobe "$SELECTED_DISK"
+    sleep 2
 
-    # Create separate credentials file
-    cat > "$ARCHINSTALL_CREDS" << EOF
-{
-    "users": [
-        {
-            "username": "$USERNAME",
-            "enc_password": "$HASHED_PASSWORD",
-            "sudo": true
-        }
-    ],
-    "root_enc_password": "$HASHED_ROOT_PASSWORD"
-}
-EOF
+    # Format boot partition
+    log "Formatting boot partition..."
+    sudo mkfs.fat -F32 "$BOOT_PARTITION"
 
-    success "Configuration file created: $ARCHINSTALL_CONFIG"
-    success "Credentials file created: $ARCHINSTALL_CREDS"
+    # Setup LUKS on root partition
+    log "Setting up LUKS encryption..."
+    echo "$LUKS_PASSWORD" | sudo cryptsetup luksFormat --pbkdf pbkdf2 "$ROOT_PARTITION" -
+
+    # Open LUKS container
+    log "Opening LUKS container..."
+    echo "$LUKS_PASSWORD" | sudo cryptsetup open "$ROOT_PARTITION" luks_root -
+
+    # Format encrypted partition with BTRFS
+    log "Formatting encrypted partition with BTRFS..."
+    sudo mkfs.btrfs -f /dev/mapper/luks_root
+
+    # Create BTRFS subvolumes
+    log "Creating BTRFS subvolumes..."
+    sudo mount /dev/mapper/luks_root /mnt
+    sudo btrfs subvolume create /mnt/@
+    sudo btrfs subvolume create /mnt/@home
+    sudo btrfs subvolume create /mnt/@log
+    sudo btrfs subvolume create /mnt/@pkg
+    sudo umount /mnt
+
+    # Mount with proper subvolumes
+    log "Mounting filesystems..."
+    sudo mount -o compress=zstd,subvol=@ /dev/mapper/luks_root /mnt
+    sudo mkdir -p /mnt/{boot,home,var/log,var/cache/pacman/pkg}
+    sudo mount "$BOOT_PARTITION" /mnt/boot
+    sudo mount -o compress=zstd,subvol=@home /dev/mapper/luks_root /mnt/home
+    sudo mount -o compress=zstd,subvol=@log /dev/mapper/luks_root /mnt/var/log
+    sudo mount -o compress=zstd,subvol=@pkg /dev/mapper/luks_root /mnt/var/cache/pacman/pkg
+
+    success "LUKS encryption setup complete"
 }
 
-# Run archinstall
-run_archinstall() {
-    log "Starting automated Arch Linux installation..."
+# Manual Arch Linux installation
+run_manual_installation() {
+    log "Starting manual Arch Linux installation..."
 
     show_dialog --msgbox "Starting Installation
 
-The automated installation will now begin.
-This process may take under 10 minutes depending on your internet speed.
+The installation will now begin.
+This process may take 10-20 minutes depending on your hardware.
 
 The installer will:
-• Partition and encrypt $SELECTED_DISK
+• Set up LUKS encryption on $SELECTED_DISK
 • Install base Arch Linux system
 • Configure bootloader and user account
 • Set up networking and audio
 
-Please be patient..." 14 70
+Please wait while the installation completes..." 16 65
 
-    # Validate configuration with dry-run first
-    log "Validating archinstall configuration..."
+    # Setup LUKS encryption first
+    setup_luks_encryption
 
-    # First check if config files exist and are readable
-    if [ ! -f "$ARCHINSTALL_CONFIG" ]; then
-        error "Config file not found: $ARCHINSTALL_CONFIG"
-        exit 1
-    fi
+    # Show progress to user
+    show_dialog --infobox "Installing base system...
 
-    if [ ! -f "$ARCHINSTALL_CREDS" ]; then
-        error "Credentials file not found: $ARCHINSTALL_CREDS"
-        exit 1
-    fi
+Installing packages from cache.
+This may take several minutes..." 8 50 &
 
-    # Show what we're validating
-    log "Config file size: $(wc -c < "$ARCHINSTALL_CONFIG") bytes"
-    log "Creds file size: $(wc -c < "$ARCHINSTALL_CREDS") bytes"
-
-    # Capture both stdout and stderr for debugging
-    if ! archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --dry-run > /tmp/archinstall-validation.log 2>&1; then
-        error "Configuration validation failed"
-
-        # Show detailed error information
-        echo "=== ARCHINSTALL VALIDATION ERROR ===" >&2
-        echo "Config file contents:" >&2
-        cat "$ARCHINSTALL_CONFIG" >&2
-        echo "" >&2
-        echo "Credentials file contents:" >&2
-        cat "$ARCHINSTALL_CREDS" >&2
-        echo "" >&2
-        echo "Validation output:" >&2
-        cat /tmp/archinstall-validation.log >&2
-        echo "===================================" >&2
-
-        show_dialog --msgbox "Configuration Invalid
-
-The archinstall configuration failed validation.
-
-ERROR DETAILS:
-$(cat /tmp/archinstall-validation.log | head -10)
-
-Check the terminal output for full details.
-
-Press OK to exit." 16 70
-        exit 1
-    fi
-    success "Configuration validated successfully"
-
-    # Run archinstall with our configuration and credentials
-    if archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --silent > /tmp/archinstall-error.log 2>&1; then
-        success "Arch Linux installation completed successfully"
-    else
-        error "Arch Linux installation failed"
-        warn "Error details may be in /tmp/archinstall-error.log"
+    # Install base system using pacstrap
+    log "Installing base system with pacstrap..."
+    if ! sudo pacstrap -c /mnt base linux linux-firmware btrfs-progs networkmanager systemd-boot cryptsetup > /tmp/pacstrap.log 2>&1; then
+        error "Base system installation failed"
+        # Cleanup on failure
+        sudo umount -R /mnt 2>/dev/null || true
+        sudo cryptsetup close luks_root 2>/dev/null || true
         show_dialog --msgbox "Installation Failed
 
-The Arch Linux installation encountered an error.
-This may be due to hardware detection issues.
+Base system installation failed during pacstrap.
 
-You can:
-1. Try running the installer again
-2. Check /tmp/archinstall-error.log for details
-3. Use manual archinstall if the problem persists
+Check /tmp/pacstrap.log for details.
 
-Press OK to exit." 12 60
+The system will exit to allow you to investigate." 12 60
         exit 1
     fi
+    success "Base system installed successfully"
+
+    # Generate fstab
+    log "Generating fstab..."
+    if ! sudo genfstab -U /mnt >> /mnt/etc/fstab; then
+        error "Failed to generate fstab"
+        sudo umount -R /mnt 2>/dev/null || true
+        sudo cryptsetup close luks_root 2>/dev/null || true
+        exit 1
+    fi
+    success "fstab generated successfully"
+
+    # Configure the system
+    log "Configuring system..."
+
+    # Set timezone
+    log "Configuring timezone..."
+    if ! sudo arch-chroot /mnt ln -sf /usr/share/zoneinfo/$SELECTED_TIMEZONE /etc/localtime; then
+        error "Failed to set timezone"
+        exit 1
+    fi
+    sudo arch-chroot /mnt hwclock --systohc || warn "Hardware clock sync failed (non-critical)"
+
+    # Set locale
+    log "Configuring locale..."
+    echo "en_US.UTF-8 UTF-8" | sudo tee /mnt/etc/locale.gen > /dev/null
+    if ! sudo arch-chroot /mnt locale-gen; then
+        error "Failed to generate locale"
+        exit 1
+    fi
+    echo "LANG=en_US.UTF-8" | sudo tee /mnt/etc/locale.conf > /dev/null
+
+    # Set keyboard layout
+    log "Setting keyboard layout..."
+    echo "KEYMAP=$SELECTED_KEYBOARD" | sudo tee /mnt/etc/vconsole.conf > /dev/null
+
+    # Set hostname
+    log "Setting hostname..."
+    echo "$HOSTNAME" | sudo tee /mnt/etc/hostname > /dev/null
+    success "System configuration completed"
+
+    # Configure hosts file
+    cat << EOF | sudo tee /mnt/etc/hosts > /dev/null
+127.0.0.1	localhost
+::1		localhost
+127.0.1.1	$HOSTNAME.localdomain	$HOSTNAME
+EOF
+
+    # Configure LUKS in installed system
+    log "Configuring LUKS encryption..."
+
+    # Add encrypt hook to mkinitcpio.conf
+    sudo sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect modconf keyboard block encrypt filesystems fsck)/' /mnt/etc/mkinitcpio.conf
+
+    # Get LUKS UUID
+    LUKS_UUID=$(sudo blkid -s UUID -o value "$ROOT_PARTITION")
+    ROOT_FS_UUID=$(sudo blkid -s UUID -o value /dev/mapper/luks_root)
+
+    # Install and configure systemd-boot
+    log "Installing systemd-boot..."
+    if ! sudo arch-chroot /mnt bootctl install; then
+        error "Failed to install systemd-boot"
+        exit 1
+    fi
+    success "systemd-boot installed successfully"
+
+    # Configure systemd-boot for LUKS
+    sudo mkdir -p /mnt/boot/loader/entries
+
+    cat << EOF | sudo tee /mnt/boot/loader/loader.conf > /dev/null
+default arch-luks.conf
+timeout 4
+console-mode max
+editor no
+EOF
+
+    cat << EOF | sudo tee /mnt/boot/loader/entries/arch-luks.conf > /dev/null
+title   Arch Linux (LUKS)
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options cryptdevice=UUID=$LUKS_UUID:luks_root root=UUID=$ROOT_FS_UUID rootflags=subvol=@ rw
+EOF
+
+    # Create user account
+    log "Creating user account..."
+    if ! sudo arch-chroot /mnt useradd -m -G wheel,audio,video,optical,storage -s /bin/bash "$USERNAME"; then
+        error "Failed to create user account"
+        exit 1
+    fi
+
+    # Set passwords
+    log "Setting passwords..."
+    if ! echo "$USERNAME:$PASSWORD" | sudo chpasswd -R /mnt; then
+        error "Failed to set user password"
+        exit 1
+    fi
+    if ! echo "root:$ROOT_PASSWORD" | sudo chpasswd -R /mnt; then
+        error "Failed to set root password"
+        exit 1
+    fi
+
+    # Enable sudo for wheel group
+    echo "%wheel ALL=(ALL:ALL) ALL" | sudo tee -a /mnt/etc/sudoers > /dev/null
+
+    # Enable NetworkManager
+    log "Enabling NetworkManager..."
+    if ! sudo arch-chroot /mnt systemctl enable NetworkManager; then
+        warn "Failed to enable NetworkManager (may need manual setup)"
+    fi
+    success "User account and network configured"
+
+    # Install additional packages
+    log "Installing additional packages..."
+    sudo arch-chroot /mnt pacman -S --noconfirm wget curl git base-devel > /tmp/packages.log 2>&1 || true
+
+    # Copy cached packages to installed system
+    log "Copying cached packages to installed system..."
+    if [ -d /var/cache/pacman/pkg ] && [ "$(ls -A /var/cache/pacman/pkg 2>/dev/null)" ]; then
+        sudo mkdir -p /mnt/var/cache/pacman/pkg
+        sudo cp /var/cache/pacman/pkg/*.pkg.tar.* /mnt/var/cache/pacman/pkg/ 2>/dev/null || true
+
+        PKG_COUNT=$(ls /mnt/var/cache/pacman/pkg/*.pkg.tar.* 2>/dev/null | wc -l)
+        log "Copied $PKG_COUNT cached packages to installed system"
+        success "Package cache copied - ArchRiot setup will use cached packages"
+    else
+        warn "No cached packages found to copy"
+    fi
+
+    # Regenerate initramfs
+    log "Regenerating initramfs..."
+    if ! sudo arch-chroot /mnt mkinitcpio -P; then
+        error "Failed to regenerate initramfs"
+        exit 1
+    fi
+    success "initramfs regenerated successfully"
+
+    # Verify installation before cleanup
+    log "Verifying installation integrity..."
+
+    # Check that essential files exist
+    if [ ! -f /mnt/boot/vmlinuz-linux ]; then
+        error "Kernel not found in /boot - installation may be incomplete"
+        exit 1
+    fi
+
+    if [ ! -f /mnt/boot/initramfs-linux.img ]; then
+        error "initramfs not found in /boot - installation may be incomplete"
+        exit 1
+    fi
+
+    if [ ! -f /mnt/boot/loader/entries/arch-luks.conf ]; then
+        error "systemd-boot entry not found - bootloader configuration failed"
+        exit 1
+    fi
+
+    # Check that user account exists
+    if ! sudo arch-chroot /mnt id "$USERNAME" > /dev/null 2>&1; then
+        error "User account '$USERNAME' not found - user creation failed"
+        exit 1
+    fi
+
+    # Check that user is in wheel group
+    if ! sudo arch-chroot /mnt groups "$USERNAME" | grep -q wheel; then
+        error "User '$USERNAME' not in wheel group - sudo access may not work"
+        exit 1
+    fi
+
+    # Check that NetworkManager is enabled
+    if ! sudo arch-chroot /mnt systemctl is-enabled NetworkManager > /dev/null 2>&1; then
+        warn "NetworkManager not enabled - network may not work after reboot"
+    fi
+
+    # Verify LUKS container is still accessible
+    if [ ! -b /dev/mapper/luks_root ]; then
+        error "LUKS container not accessible - encryption setup failed"
+        exit 1
+    fi
+
+    # Check that package cache was copied
+    PKG_COUNT=$(ls /mnt/var/cache/pacman/pkg/*.pkg.tar.* 2>/dev/null | wc -l)
+    if [ "$PKG_COUNT" -lt 100 ]; then
+        warn "Package cache appears incomplete ($PKG_COUNT packages) - ArchRiot setup may need internet"
+    else
+        success "Package cache verified ($PKG_COUNT packages available for ArchRiot setup)"
+    fi
+
+    success "Installation verification completed - all critical components verified"
+
+    # Security cleanup - clear sensitive data from memory
+    log "Performing security cleanup..."
+
+    # Clear password variables
+    PASSWORD=""
+    ROOT_PASSWORD=""
+    LUKS_PASSWORD=""
+    unset PASSWORD
+    unset ROOT_PASSWORD
+    unset LUKS_PASSWORD
+
+    # Clear any temporary files containing sensitive data
+    sudo shred -vfz -n 3 /tmp/pacstrap.log 2>/dev/null || true
+    sudo shred -vfz -n 3 /tmp/packages.log 2>/dev/null || true
+    rm -f /tmp/input_result /tmp/password_result /tmp/menu_result 2>/dev/null || true
+
+    # Clear bash history to remove any accidentally typed passwords
+    history -c 2>/dev/null || true
+
+    success "Security cleanup completed - sensitive data cleared"
+
+    # Unmount filesystems and cleanup before reboot
+    log "Unmounting filesystems and cleaning up..."
+
+    # Sync to ensure all data is written
+    sync
+
+    # Unmount all mounted filesystems
+    sudo umount -R /mnt 2>/dev/null || {
+        warn "Some filesystems may still be busy, forcing unmount..."
+        sudo umount -f /mnt/var/cache/pacman/pkg 2>/dev/null || true
+        sudo umount -f /mnt/var/log 2>/dev/null || true
+        sudo umount -f /mnt/home 2>/dev/null || true
+        sudo umount -f /mnt/boot 2>/dev/null || true
+        sudo umount -f /mnt 2>/dev/null || true
+    }
+
+    # Close LUKS container
+    sudo cryptsetup close luks_root 2>/dev/null || true
+
+    success "Cleanup completed - system ready for reboot"
+    success "Manual Arch Linux installation completed successfully"
+
+    # Show post-install instructions
+    show_dialog --msgbox "🎉 ArchRiot Base Installation Complete!
+
+The base Arch Linux system has been installed successfully with LUKS encryption.
+
+🚀 IMPORTANT: To complete the ArchRiot setup, you must run this command after rebooting:
+
+curl -fsSL https://ArchRiot.org/setup.sh | bash
+
+This will install the ArchRiot desktop environment, themes, and all customizations.
+
+Press OK to continue..." 16 75
+
+    # Create a reminder file on the installed system
+    cat << 'EOF' | sudo tee /mnt/home/$USERNAME/.archriot-setup.sh > /dev/null
+#!/bin/bash
+echo ""
+echo "🚀 Welcome to ArchRiot!"
+echo ""
+echo "To complete your ArchRiot setup, run:"
+echo "curl -fsSL https://ArchRiot.org/setup.sh | bash"
+echo ""
+EOF
+    sudo chmod +x /mnt/home/$USERNAME/.archriot-setup.sh
+    sudo chown 1000:1000 /mnt/home/$USERNAME/.archriot-setup.sh
+
+    # Add to user's .bashrc
+    echo "" | sudo tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
+    echo "# ArchRiot setup reminder" | sudo tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
+    echo "if [ -f ~/.archriot-setup.sh ]; then ~/.archriot-setup.sh; fi" | sudo tee -a /mnt/home/$USERNAME/.bashrc > /dev/null
+    sudo chown 1000:1000 /mnt/home/$USERNAME/.bashrc
 }
 
 # Install ArchRiot welcome message for first boot
@@ -1043,8 +1167,7 @@ main() {
     # Get user information
     setup_user
 
-    # Create archinstall configuration
-    create_archinstall_config
+    # Manual installation - no archinstall config needed
 
     # Final confirmation
     if ! show_dialog --yesno "Ready to Install
@@ -1068,7 +1191,7 @@ Proceed with installation?" 18 60; then
     fi
 
     # Run the installation
-    run_archinstall
+    run_manual_installation
 
     # Install ArchRiot
     install_archriot
@@ -1089,7 +1212,7 @@ Note: The first boot may take a few extra moments to initialize services." 14 70
     log "System will reboot in 10 seconds..."
 
     # Clean up
-    rm -f "$ARCHINSTALL_CONFIG" /tmp/input_result /tmp/password_result /tmp/menu_result
+    rm -f /tmp/input_result /tmp/password_result /tmp/menu_result
 
     # Reboot
     sleep 10
