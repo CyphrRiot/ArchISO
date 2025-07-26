@@ -849,6 +849,11 @@ Press OK to exit." 16 70
     fi
     success "Configuration validated successfully"
 
+    # Disable reflector to prevent hanging
+    log "Disabling reflector service to prevent hanging..."
+    systemctl mask reflector.service 2>/dev/null || true
+    systemctl stop reflector.service 2>/dev/null || true
+
     # Run archinstall with our configuration and credentials
     if archinstall --config "$ARCHINSTALL_CONFIG" --creds "$ARCHINSTALL_CREDS" --silent > /tmp/archinstall-error.log 2>&1; then
         success "Arch Linux installation completed successfully"
