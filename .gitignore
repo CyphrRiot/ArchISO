@@ -47,3 +47,4 @@ temp_uuid_fix/
 .Trashes
 ehthumbs.db
 Thumbs.db
+build/
