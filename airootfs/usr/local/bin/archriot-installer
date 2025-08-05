@@ -632,8 +632,16 @@ create_archinstall_config() {
     # Calculate dynamic partition sizes based on selected disk
     DISK_SIZE_BYTES=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
 
-    # Root partition size: total disk - root start - GPT backup header space (exact archinstall calculation)
-    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - 1074790400 - 1138688))
+    # Calculate aligned partition boundaries (1 MiB = 1048576 bytes)
+    # Boot partition: 1 MiB start, 1 GiB size
+    BOOT_START_BYTES=1048576  # 1 MiB aligned start
+    BOOT_SIZE_BYTES=1073741824  # 1 GiB exact
+
+    # Root partition: starts after boot partition, aligned to 1 MiB boundary
+    ROOT_START_BYTES=$((BOOT_START_BYTES + BOOT_SIZE_BYTES))  # 1025 MiB start
+
+    # Root size: remaining space minus GPT backup (1 MiB for GPT backup header)
+    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - ROOT_START_BYTES - 1048576))
 
     # Generate unique partition IDs
     BOOT_ID=$(uuidgen)
@@ -670,16 +678,16 @@ create_archinstall_config() {
                                 "unit": "B",
                                 "value": 512
                             },
-                            "unit": "GiB",
-                            "value": 1
+                            "unit": "B",
+                            "value": $BOOT_SIZE_BYTES
                         },
                         "start": {
                             "sector_size": {
                                 "unit": "B",
                                 "value": 512
                             },
-                            "unit": "MiB",
-                            "value": 1
+                            "unit": "B",
+                            "value": $BOOT_START_BYTES
                         },
                         "status": "create",
                         "type": "primary"
@@ -723,7 +731,7 @@ create_archinstall_config() {
                                 "value": 512
                             },
                             "unit": "B",
-                            "value": 1074790400
+                            "value": $ROOT_START_BYTES
                         },
                         "status": "create",
                         "type": "primary"
