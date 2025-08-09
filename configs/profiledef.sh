@@ -19,6 +19,6 @@ bootstrap_tarball_compression=('zstd' '-c' '-T0' '--auto-threads=logical' '--lon
 file_permissions=(
   ["/etc/shadow"]="0:0:400"
   ["/root"]="0:0:750"
-  ["/usr/local/bin/archriot-installer"]="0:0:755"
-  ["/etc/systemd/system/archriot-installer.service"]="0:0:644"
+  ["/usr/local/bin/riot"]="0:0:755"
+  ["/etc/systemd/system/riot-installer.service"]="0:0:644"
 )

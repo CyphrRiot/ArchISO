@@ -11,7 +11,7 @@ if [[ ! -f "$MARKER_FILE" ]]; then
     clear
 
     echo
-    echo "🎉 Welcome to ArchRiot! 🎉"
+    echo "Welcome to ArchRiot!"
     echo "=========================="
     echo
     echo "Your base Arch Linux system is ready, but you need to complete"
@@ -22,9 +22,9 @@ if [[ ! -f "$MARKER_FILE" ]]; then
     echo "  curl -fsSL https://ArchRiot.org/setup.sh | bash"
     echo
     echo "This will install:"
-    echo "  • Hyprland desktop environment"
-    echo "  • ArchRiot configurations and themes"
-    echo "  • Essential applications"
+    echo "  - Hyprland desktop environment"
+    echo "  - ArchRiot configurations and themes"
+    echo "  - Essential applications"
     echo
     echo "After setup completes, you'll have the full ArchRiot experience!"
     echo

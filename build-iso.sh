@@ -312,8 +312,8 @@ fi
 echo -e "${BLUE}⚙️  Modifying squashfs filesystem...${NC}"
 
 # Verify installer files exist
-if [[ ! -f "airootfs/usr/local/bin/archriot-installer" ]]; then
-    echo -e "${RED}❌ Installer script not found: airootfs/usr/local/bin/archriot-installer${NC}"
+if [[ ! -f "airootfs/usr/local/bin/riot" ]]; then
+    echo -e "${RED}❌ Installer script not found: airootfs/usr/local/bin/riot${NC}"
     exit 1
 fi
 
@@ -338,49 +338,20 @@ chmod -R u+w "$AIROOTFS_DIR"
 # Add our installer script
 echo -e "${BLUE}📝 Adding ArchRiot installer...${NC}"
 mkdir -p "$AIROOTFS_DIR/usr/local/bin"
-cp airootfs/usr/local/bin/archriot-installer "$AIROOTFS_DIR/usr/local/bin/"
-chmod +x "$AIROOTFS_DIR/usr/local/bin/archriot-installer"
+cp airootfs/usr/local/bin/riot "$AIROOTFS_DIR/usr/local/bin/"
+chmod +x "$AIROOTFS_DIR/usr/local/bin/riot"
 
-# Add the archriot-install launcher command
-cp airootfs/usr/local/bin/archriot-install "$AIROOTFS_DIR/usr/local/bin/"
-chmod +x "$AIROOTFS_DIR/usr/local/bin/archriot-install"
+# Add the riot-install launcher command
+cp airootfs/usr/local/bin/riot-install "$AIROOTFS_DIR/usr/local/bin/"
+chmod +x "$AIROOTFS_DIR/usr/local/bin/riot-install"
 
 # Add custom MOTD
 cp airootfs/etc/motd "$AIROOTFS_DIR/etc/"
 echo -e "${GREEN}✅ Added ArchRiot installer and welcome message${NC}"
 
-# Add package cache if available
-if [[ -d "$BUILD_DIR/package_cache" && -n "$(ls -A "$BUILD_DIR/package_cache" 2>/dev/null)" ]]; then
-    echo -e "${BLUE}📦 Adding package cache to filesystem...${NC}"
-    mkdir -p "$AIROOTFS_DIR/var/cache/pacman/pkg"
-    sudo cp "$BUILD_DIR/package_cache"/*.pkg.tar.* "$AIROOTFS_DIR/var/cache/pacman/pkg/" 2>/dev/null || true
-
-    pkg_count=$(ls "$AIROOTFS_DIR/var/cache/pacman/pkg"/*.pkg.tar.* 2>/dev/null | wc -l)
-    echo -e "${GREEN}✅ Added $pkg_count packages to filesystem cache${NC}"
-
-    # Extract dialog package for TUI functionality
-    echo -e "${BLUE}🔧 Extracting dialog package for live environment...${NC}"
-
-    # Find dialog package in cache
-    dialog_pkg=$(ls "$AIROOTFS_DIR/var/cache/pacman/pkg/dialog"-*.pkg.tar.* 2>/dev/null | head -1)
-    if [[ -n "$dialog_pkg" ]]; then
-        echo -e "${BLUE}📦 Extracting dialog from $(basename "$dialog_pkg")...${NC}"
-        # Calculate relative path before changing directories
-        dialog_rel_path=$(realpath --relative-to="$AIROOTFS_DIR" "$dialog_pkg")
-        cd "$AIROOTFS_DIR"
-        sudo bsdtar -xf "$dialog_rel_path" --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.BUILDINFO' --exclude='.INSTALL'
-        if [[ -f "usr/bin/dialog" ]]; then
-            echo -e "${GREEN}✅ Dialog extracted successfully${NC}"
-        else
-            echo -e "${RED}❌ Dialog extraction failed - binary not found${NC}"
-        fi
-        cd - >/dev/null
-    else
-        echo -e "${YELLOW}⚠️  Dialog package not found in cache${NC}"
-    fi
-else
-    echo -e "${YELLOW}⚠️  No package cache to add${NC}"
-fi
+# Skip dialog extraction for now (whiptail is already available in base ISO)
+echo -e "${BLUE}🔧 Skipping dialog extraction (using whiptail from base ISO)${NC}"
+echo -e "${GREEN}✅ ISO kept lightweight - packages will download during installation${NC}"
 
 # Repack the squashfs filesystem
 echo -e "${BLUE}📦 Repacking squashfs filesystem...${NC}"
@@ -407,16 +378,8 @@ cache_packages
 set -e  # Re-enable exit on error
 
 # Copy cached packages to ISO
-echo -e "${BLUE}📋 Copying cached packages to ISO...${NC}"
-if [[ -d "$BUILD_DIR/package_cache" && -n "$(ls -A "$BUILD_DIR/package_cache" 2>/dev/null)" ]]; then
-    sudo cp "$BUILD_DIR/package_cache"/*.pkg.tar.* "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg/" 2>/dev/null || true
-
-    # Count packages copied
-    pkg_count=$(ls "$EXTRACT_DIR/airootfs/var/cache/pacman/pkg"/*.pkg.tar.* 2>/dev/null | wc -l)
-    echo -e "${GREEN}✅ Copied $pkg_count packages to ISO cache${NC}"
-else
-    echo -e "${YELLOW}⚠️  No packages in cache to copy${NC}"
-fi
+echo -e "${BLUE}📋 Skipping package cache copy (keeping ISO size small)${NC}"
+echo -e "${GREEN}✅ Packages will be downloaded during installation${NC}"
 
 # Step 5: Repack the ISO with proper UEFI support
 echo -e "${BLUE}📀 Repacking modified ISO with UEFI support...${NC}"
@@ -694,8 +657,7 @@ echo -e "${GREEN}🎉🎉🎉 ArchRiot ISO BUILD COMPLETE! 🎉🎉🎉${NC}"
 echo -e "${GREEN}================================================${NC}"
 echo -e "${GREEN}✅ ISO Size: $ISO_SIZE${NC}"
 echo -e "${GREEN}✅ UEFI + BIOS Boot Support${NC}"
-PKG_COUNT=$(ls "$BUILD_DIR/package_cache"/*.pkg.tar.* 2>/dev/null | wc -l)
-echo -e "${GREEN}✅ Complete Package Cache ($PKG_COUNT packages)${NC}"
+echo -e "${GREEN}✅ Lightweight ISO (packages downloaded during install)${NC}"
 echo -e "${GREEN}✅ Seamless Installer Experience${NC}"
 echo -e "${GREEN}✅ Ready for Hardware Testing${NC}"
 

@@ -21,4 +21,4 @@ Starting the ArchRiot installation wizard...
 EOF
 
 sleep 2
-exec /usr/local/bin/archriot-installer "$@"
+exec /usr/local/bin/riot "$@"
