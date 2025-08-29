@@ -1,12 +1,14 @@
 # Build artifacts and temporary files
 build/
 build/**/*
-*.iso
 *.img
-isos/*
 
 # NO LOGS!!!
 logs/*
+
+# NO ISOS in git!
+*.iso
+isos/*
 
 # do not add the plan!
 plan.md
