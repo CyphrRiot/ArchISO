@@ -131,7 +131,7 @@ tumbler
 libwebp
 libheif
 libavif
-raw-thumbnailer
+
 gnome-calculator
 nwg-drawer
 swaync
@@ -159,7 +159,7 @@ gnome-text-editor
 zed
 abiword
 papers
-p7zip
+7zip
 gnome-clocks
 
 # Utilities (utilities.sh)

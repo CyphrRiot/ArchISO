@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenSSH Socket (masked in ArchRiot live ISO)
+Documentation=man:sshd(8) man:sshd_config(5)
+# Never start or activate this socket in the live environment
+Condition=false
+
+[Socket]
+# Neutralize any listeners and activation targets
+ListenStream=
+Accept=no
+Service=
+
+[Install]
+# Ensure no target pulls this in
+WantedBy=

@@ -869,74 +869,47 @@ install_base_system() {
     echo "INSTALL_BASE_SYSTEM_STARTED_$(date)" >> /tmp/riot_debug.log
     log "Installing base Arch Linux system..."
 
-    # Configure pacman mirrors for faster downloads
-    log "Configuring package mirrors..."
-    log "Using timezone to determine best mirrors..."
+    # Copy cached packages to live environment and make offline repo available in target
+    log "Setting up package cache from ISO..."
+    mkdir -p /var/cache/pacman/pkg
+    if [[ -d "/opt/archriot-cache/official" ]]; then
+        log "Copying cached packages to live pacman cache..."
+        cp /opt/archriot-cache/official/*.pkg.tar.* /var/cache/pacman/pkg/ 2>/dev/null || true
+        local cached_count=$(ls /opt/archriot-cache/official/*.pkg.tar.* 2>/dev/null | wc -l)
+        log "Copied $cached_count cached packages into live cache"
 
-    # Map timezone to reflector country names
-    case "$SELECTED_TIMEZONE" in
-        *US*|*America/New_York*|*America/Chicago*|*America/Denver*|*America/Los_Angeles*) COUNTRY="United States" ;;
-        *Europe/London*|*Europe/Belfast*) COUNTRY="United Kingdom" ;;
-        *Europe/Berlin*|*Europe/Munich*) COUNTRY="Germany" ;;
-        *Europe/Paris*) COUNTRY="France" ;;
-        *Europe/Madrid*) COUNTRY="Spain" ;;
-        *Europe/Rome*) COUNTRY="Italy" ;;
-        *Europe/Amsterdam*) COUNTRY="Netherlands" ;;
-        *Australia*) COUNTRY="Australia" ;;
-        *Asia/Tokyo*) COUNTRY="Japan" ;;
-        *Canada*) COUNTRY="Canada" ;;
-        *) COUNTRY="United States" ;; # Safe fallback
-    esac
-
-    log "Selected country for mirrors: $COUNTRY"
-    log "Finding fastest mirrors (this may take 1-2 minutes)..."
-    log "You will see reflector output below:"
-    echo
-
-    if reflector --country "$COUNTRY" --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist; then
-        log "Mirror configuration completed successfully"
+        # Make offline repo and config available inside the target chroot
+        log "Copying offline repo and config into target root..."
+        mkdir -p /mnt/opt
+        cp -r /opt/archriot-cache /mnt/opt/ 2>/dev/null || true
+        cp /etc/pacman-offline.conf /mnt/etc/ 2>/dev/null || true
     else
-        warn "Failed to update mirrors for $COUNTRY, using worldwide mirrors"
-        reflector --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist || {
-            warn "Reflector failed entirely, using default mirrors"
-        }
+        warn "No cached packages found, will download from mirrors"
     fi
 
-    # Install base system packages
-    log "Installing base packages (linux, base, linux-firmware)..."
-    if ! pacstrap /mnt base linux linux-firmware; then
-        error "Failed to install base packages"
+    # Install base system packages (offline repo, curated minimal set to avoid conflicts)
+    log "Installing curated minimal base set from embedded offline repo..."
+    # Prime offline repository database to ensure pacstrap sees it
+    log "Priming offline repository database..."
+    pacman --config /etc/pacman-offline.conf -Sy --noconfirm >/dev/null 2>&1 || true
+    # Curated minimal base set; let pacman resolve providers from the embedded repo
+    BASE_PKGS=(base linux linux-firmware btrfs-progs cryptsetup sudo nano networkmanager iwd iw dhcpcd curl wget git intel-ucode amd-ucode mkinitcpio)
+    if ! pacstrap -C /etc/pacman-offline.conf /mnt "${BASE_PKGS[@]}"; then
+        error "Failed to install curated minimal base set"
         return 1
     fi
 
-    # Install essential packages for ArchRiot
-    log "Installing essential system packages..."
-    if ! pacstrap /mnt \
-        base-devel \
-        networkmanager \
-        sudo \
-        nano \
-        git \
-        curl \
-        wget \
-        intel-ucode \
-        amd-ucode \
-        efibootmgr \
-        btrfs-progs; then
-        error "Failed to install essential packages"
-        return 1
-    fi
+    # Essential packages are part of the embedded manifest
+    log "Essential system packages were installed via the embedded manifest (pacstrap)."
 
-    # Install audio system (pipewire as per ArchRiot settings)
-    log "Installing audio system (pipewire)..."
-    if ! pacstrap /mnt \
-        pipewire \
-        pipewire-alsa \
-        pipewire-pulse \
-        pipewire-jack \
-        wireplumber; then
-        error "Failed to install audio packages"
-        return 1
+    # Audio stack is part of the embedded manifest
+    log "Audio system (PipeWire stack) was installed via the embedded manifest (pacstrap)."
+
+    # Packages from the embedded manifest were installed via pacstrap; skip re-install in chroot
+    if [[ -f "/opt/archriot-cache/offline-included.txt" ]]; then
+        log "Skipping embedded offline package install in chroot (already installed via pacstrap)."
+    else
+        warn "No embedded offline package list found, skipping preinstall"
     fi
 
     success "Base system installation complete"
@@ -1092,7 +1065,7 @@ install_grub() {
     log "Installing GRUB bootloader for VM/legacy systems..."
 
     # Install GRUB packages
-    if ! pacstrap /mnt grub efibootmgr; then
+    if ! pacstrap -C /etc/pacman-offline.conf /mnt grub efibootmgr; then
         error "Failed to install GRUB packages"
         echo "GRUB_PACKAGES_FAILED" >> /tmp/riot_debug.log
         return 1
@@ -1421,56 +1394,39 @@ You will see real progress updates!" 14 70
     success "ArchRiot Linux base system installation finished successfully!"
 }
 
-# Install ArchRiot welcome message for first boot
-install_archriot() {
-    log "Setting up ArchRiot first-boot installation..."
+# Install ArchRiot desktop in chroot
+install_archriot_desktop() {
+    log "Pre-installing all ArchRiot packages from ISO cache..."
 
-    # Transfer WiFi credentials to new system (if any exist)
-    transfer_wifi_credentials
+    # Install embedded offline packages (prefer offline-included.txt), fallback to offline-core.txt
+    if [[ -f "/opt/archriot-cache/offline-included.txt" ]]; then
+        arch-chroot /mnt pacman --config /etc/pacman-offline.conf -S --noconfirm --needed $(cat /opt/archriot-cache/offline-included.txt)
+    elif [[ -f "/opt/archriot-cache/offline-core.txt" ]]; then
+        arch-chroot /mnt pacman --config /etc/pacman-offline.conf -S --noconfirm --needed $(cat /opt/archriot-cache/offline-core.txt)
+    fi
 
-    # Create ArchRiot auto-installer for first boot
-    arch-chroot /mnt /bin/bash -c "
-# Create first-boot ArchRiot installer
-mkdir -p /usr/local/bin
-cat > /usr/local/bin/archriot-first-boot << 'FIRSTBOOT_EOF'
+    # Defer AUR packages to post-boot configuration (online)
+    if [[ -d "/opt/archriot-cache/aur" ]]; then
+        log "Deferring AUR packages to post-boot setup"
+    fi
+
+    # Download ArchRiot repository to user directory
+    arch-chroot /mnt su - $USERNAME -c "
+        mkdir -p ~/.local/share
+        git clone https://github.com/CyphrRiot/ArchRiot.git ~/.local/share/archriot
+    "
+
+    # Create first-boot script that runs ArchRiot installer
+    cat > /mnt/usr/local/bin/archriot-first-boot << 'EOF'
 #!/bin/bash
+cd ~/.local/share/archriot/install
+./archriot
+rm /usr/local/bin/archriot-first-boot
+EOF
+    chmod +x /mnt/usr/local/bin/archriot-first-boot
+    echo '/usr/local/bin/archriot-first-boot' >> /mnt/home/$USERNAME/.bashrc
 
-# ArchRiot First Boot Installation
-clear
-echo
-echo \"Welcome to ArchRiot Linux!\"
-echo \"=========================\"
-echo
-echo \"Installing ArchRiot desktop environment...\"
-echo \"This will take a few minutes.\"
-echo
-
-# Install ArchRiot desktop
-if curl -fsSL https://ArchRiot.org/setup.sh | bash; then
-    echo
-    echo \"ArchRiot desktop installation complete!\"
-    echo \"Rebooting to ArchRiot desktop...\"
-    sleep 3
-    # Remove this script so it doesn't run again
-    rm -f /usr/local/bin/archriot-first-boot
-    systemctl reboot
-else
-    echo
-    echo \"ArchRiot installation failed.\"
-    echo \"You can run this again later with:\"
-    echo \"  curl -fsSL https://ArchRiot.org/setup.sh | bash\"
-    echo
-    read -p \"Press Enter to continue to shell...\"
-fi
-FIRSTBOOT_EOF
-
-chmod +x /usr/local/bin/archriot-first-boot
-
-# Add to user's bashrc to run on first login
-echo '/usr/local/bin/archriot-first-boot' >> /home/$USERNAME/.bashrc
-"
-
-    success "ArchRiot first-boot installer configured"
+    success "All packages pre-installed - first boot will be FAST!"
 }
 
 # Transfer WiFi credentials to new system
@@ -1628,8 +1584,8 @@ Proceed with installation?" 18 60; then
     # Run the installation
     run_archinstall
 
-    # Install ArchRiot
-    install_archriot
+    # Install ArchRiot desktop
+    install_archriot_desktop
 
     # Installation complete
     show_dialog --msgbox "Installation Complete!
@@ -1648,20 +1604,15 @@ Note: The first boot may take a few extra moments to initialize services." 14 70
     # Show post-install ArchRiot setup instructions
     show_dialog --msgbox "Installation Complete!
 
-Base Arch Linux system has been installed successfully!
+ArchRiot base system has been installed successfully!
 
-IMPORTANT - Complete Your ArchRiot Setup:
+First boot will be fast:
+- Enter your disk encryption password when prompted
+- Log in with your user account ($USERNAME)
+- A local first-boot script will run automatically to apply ArchRiot configurations
+- No large package downloads; configs only (about 60–90 seconds)
 
-After the system reboots and you log in, run this command to finish setting up ArchRiot:
-
-curl -fsSL https://ArchRiot.org/setup.sh | bash
-
-This will install:
-- Hyprland desktop environment
-- All ArchRiot configurations
-- Essential applications and themes
-
-Press OK to reboot and complete your ArchRiot installation!" 18 75
+After that, you'll land in the ArchRiot Hyprland desktop, ready to use." 18 75
 
     log "System will reboot in 10 seconds..."
 

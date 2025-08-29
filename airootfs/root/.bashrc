@@ -18,8 +18,3 @@ if [[ -t 0 && -t 1 && -t 2 ]]; then
     sleep 1
     exec riot
 fi
-
-# ArchRiot first boot setup reminder
-if [[ -f ~/.archriot-first-boot.sh ]]; then
-    source ~/.archriot-first-boot.sh
-fi
