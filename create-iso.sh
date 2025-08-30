@@ -649,49 +649,75 @@ unmount_airootfs_mounts() {
         return 0
     fi
 
+    # Absolute safety check - never unmount anything outside our build tree
+    if [[ ! "$mount_root" =~ ArchISO.*out/work/x86_64/airootfs$ ]]; then
+        log_error "SAFETY: Refusing to unmount suspicious path: $mount_root"
+        log_error "Expected path pattern: */ArchISO/*/out/work/x86_64/airootfs"
+        return 1
+    fi
+
     log_info "Unmounting any airootfs bind mounts under: $mount_root"
 
-    # First attempt to unmount known bind mounts explicitly
-    local known_mounts=(proc sys dev dev/pts dev/shm run var/run tmp var/tmp)
-    for rel in "${known_mounts[@]}"; do
-        local p="$mount_root/$rel"
-        if [[ -e "$p" ]]; then
+    # Only unmount paths that are actually subdirectories of our target mount root
+    # This ensures we never touch anything outside the build environment
+    local known_relative_paths=(proc sys dev dev/pts dev/shm run var/run tmp var/tmp)
+    local to_unmount=()
+
+    # Check each known relative path for active mounts within our scope
+    for rel_path in "${known_relative_paths[@]}"; do
+        local full_path="$mount_root/$rel_path"
+        if [[ -e "$full_path" ]]; then
+            # Confirm it's a mount point before attempting to unmount
             if command -v findmnt >/dev/null 2>&1; then
-                if findmnt -n "$p" >/dev/null 2>&1; then
-                    sudo umount -R -f "$p" 2>/dev/null || sudo umount -l "$p" 2>/dev/null || true
+                if findmnt -n "$full_path" >/dev/null 2>&1; then
+                    to_unmount+=("$full_path")
                 fi
             else
-                # Fallback check via /proc/self/mounts
-                if awk '{print $2}' /proc/self/mounts | grep -qx "$p"; then
-                    sudo umount -R -f "$p" 2>/dev/null || sudo umount -l "$p" 2>/dev/null || true
+                # Fallback using /proc/self/mounts
+                if awk '{print $2}' /proc/self/mounts | grep -Fxq "$full_path"; then
+                    to_unmount+=("$full_path")
                 fi
             fi
         fi
     done
 
-    # Discover all subtree mounts under airootfs and unmount deepest-first
-    local mounts=()
+    # Also scan for any additional unexpected mounts inside the tree
     if command -v findmnt >/dev/null 2>&1; then
-        while IFS= read -r m; do
-            mounts+=("$m")
-        done < <(findmnt -R -n -o TARGET --target "$mount_root" | sort -r)
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && to_unmount+=("$line")
+        done < <(findmnt -R -n -o TARGET --target "$mount_root" | grep "^$mount_root" | grep -vFf <(printf '%s\n' "${to_unmount[@]}"))
     else
-        while IFS= read -r m; do
-            mounts+=("$m")
-        done < <(awk '{print $2}' /proc/self/mounts | grep "^$mount_root" | sort -r)
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && to_unmount+=("$line")
+        done < <(awk '{print $2}' /proc/self/mounts | grep "^$mount_root/" | grep -vFf <(printf '%s\n' "${to_unmount[@]}"))
     fi
 
-    for m in "${mounts[@]}"; do
-        sudo umount -R -f "$m" 2>/dev/null || sudo umount -l "$m" 2>/dev/null || true
-    done
+    # Sort descending by path depth so deeper mounts get unmounted first
+    if [[ ${#to_unmount[@]} -gt 0 ]]; then
+        mapfile -t to_unmount < <(printf '%s\n' "${to_unmount[@]}" | awk '{print gsub(/\//,"/"), $0}' | sort -k1,1nr | cut -d' ' -f2-)
 
-    # Verify none remain; warn if they do
+        # Perform the unmounts
+        for mp in "${to_unmount[@]}"; do
+            # Extra safety: confirm path is still within intended scope
+            if [[ "$mp" == "$mount_root"/* ]]; then
+                log_info "Unmounting: $mp"
+                sudo umount -f "$mp" 2>/dev/null || sudo umount -l "$mp" 2>/dev/null || log_warning "Failed to unmount $mp"
+            else
+                log_warning "Skipping unsafe unmount target: $mp"
+            fi
+        done
+    fi
+
+    # Final verification pass only within our build scope
+    local remaining_count=0
     if command -v findmnt >/dev/null 2>&1; then
-        local remaining
-        remaining=$(findmnt -R -n -o TARGET --target "$mount_root" | wc -l || true)
-        if [[ "${remaining:-0}" -gt 0 ]]; then
-            log_warning "Some airootfs mounts remain under $mount_root (count: $remaining). Lazy unmounts may still be required."
-        fi
+        remaining_count=$(findmnt -R -n -o TARGET --target "$mount_root" | grep "^$mount_root" | wc -l || echo 0)
+    else
+        remaining_count=$(awk '{print $2}' /proc/self/mounts | grep "^$mount_root/" | wc -l || echo 0)
+    fi
+
+    if [[ $remaining_count -gt 0 ]]; then
+        log_warning "There are $remaining_count mount points left under $mount_root which could not be safely unmounted."
     fi
 }
 
