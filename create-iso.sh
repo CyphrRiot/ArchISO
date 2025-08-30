@@ -573,16 +573,20 @@ build_iso() {
         mkdir -p "$WORK_DIR/isos"
 
         # Copy ISO to canonical path
-        local final_iso="$WORK_DIR/isos/archriot-2025.iso"
-        cp -f "$iso_file" "$final_iso"
+        local final_iso="$WORK_DIR/isos/archriot.iso"
+        if [[ "$iso_file" -ef "$final_iso" ]]; then
+            log_info "ISO already in correct location: $final_iso"
+        else
+            cp -f "$iso_file" "$final_iso"
+        fi
 
         # Show ISO size
         local iso_size=$(du -h "$final_iso" | cut -f1)
         log_info "ISO size: $iso_size"
 
         # Generate SHA256 checksum
-        (cd "$WORK_DIR/isos" && sha256sum "archriot-2025.iso" > "archriot-2025.sha256")
-        log_info "SHA256 checksum created: isos/archriot-2025.sha256"
+        (cd "$WORK_DIR/isos" && sha256sum "archriot.iso" > "archriot.sha256")
+        log_info "SHA256 checksum created: isos/archriot.sha256"
 
         # Create symlink for easy access
         ln -sf "$final_iso" "$WORK_DIR/archriot-latest.iso"
@@ -778,8 +782,8 @@ main() {
     test_iso
 
     log_success "ArchRiot ISO build completed successfully!"
-    log_info "ISO location: $WORK_DIR/isos/archriot-2025.iso"
-    log_info "Checksum: $WORK_DIR/isos/archriot-2025.sha256"
+    log_info "ISO location: $WORK_DIR/isos/archriot.iso"
+    log_info "Checksum: $WORK_DIR/isos/archriot.sha256"
     log_info "Quick access: $WORK_DIR/archriot-latest.iso"
 }
 

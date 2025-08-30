@@ -34,10 +34,10 @@ print_info() {
 }
 
 # Configuration
-ISO_PATH="isos/archriot-2025.iso"
-VM_NAME="archriot-test"
+ISO_PATH="isos/archriot.iso"
+VM_NAME="archriot"
 MEMORY="4096"  # 4GB RAM
-DISK_SIZE="20G"
+DISK_SIZE="10G"
 DISK_PATH="./${VM_NAME}.qcow2"
 
 # Check if ISO exists
