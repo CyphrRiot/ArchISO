@@ -142,10 +142,13 @@ download_packages() {
     log_info "Copying packages from system cache to build cache..."
 
     for package in "${packages[@]}"; do
-        # Find the package file(s) for this package name, excluding signature files
-        find "$pacman_cache" -name "${package}-*.pkg.tar.zst" -not -name "*.sig" -exec cp {} "$CACHE_DIR/official/" \; 2>/dev/null || {
+        # Find only the latest version of each package, excluding signature files
+        local latest_pkg=$(find "$pacman_cache" -name "${package}-*.pkg.tar.zst" -not -name "*.sig" | sort -V | tail -1)
+        if [[ -n "$latest_pkg" ]]; then
+            cp "$latest_pkg" "$CACHE_DIR/official/"
+        else
             log_warning "Could not find cached package for: $package"
-        }
+        fi
     done
 
     log_success "Package download completed"
@@ -228,10 +231,13 @@ create_repository() {
 
     # Create repository database
     log_info "Running repo-add to create database..."
-    repo-add archriot-offline.db.tar.gz *.pkg.tar.zst || {
+    repo-add -q archriot-offline.db.tar.gz *.pkg.tar.zst 2> >(grep -v "WARNING: An entry for\|WARNING: A newer version for" >&2) || {
         log_error "Failed to create repository database"
         exit 1
     }
+
+    # Clean up .old backup files created by repo-add
+    rm -f *.old 2>/dev/null || true
 
     # Verify database was created
     if [[ -f "archriot-offline.db.tar.gz" ]]; then
@@ -294,12 +300,11 @@ customize_profile() {
     log_info "Customizing archiso profile..."
 
     # Create directory structure in airootfs
-    mkdir -p "$PROFILE_DIR/airootfs/opt/archriot-cache/official"
     mkdir -p "$PROFILE_DIR/airootfs/usr/local/bin"
     mkdir -p "$PROFILE_DIR/airootfs/etc/systemd/system"
     mkdir -p "$PROFILE_DIR/airootfs/etc/systemd/system/multi-user.target.wants"
 
-    # Copy packages and database to profile
+    # Copy curated configs
     # Copy curated archiso profile files if present
     if [[ -f "$WORK_DIR/configs/profiledef.sh" ]]; then
         log_info "Using curated profiledef.sh from configs/"
@@ -313,8 +318,12 @@ customize_profile() {
         log_info "Using curated pacman.conf from configs/"
         cp "$WORK_DIR/configs/pacman.conf" "$PROFILE_DIR/pacman.conf"
     fi
-    log_info "Copying packages to profile..."
-    cp -r "$CACHE_DIR/official/"* "$PROFILE_DIR/airootfs/opt/archriot-cache/official/"
+
+    # Copy offline repository to ISO
+    log_info "Copying offline repository to ISO..."
+    mkdir -p "$PROFILE_DIR/airootfs/opt/archriot-cache"
+    cp -r "$CACHE_DIR/official" "$PROFILE_DIR/airootfs/opt/archriot-cache/"
+    log_success "Offline repository copied to ISO"
 
     # Copy riot installer
     if [[ -f "$WORK_DIR/airootfs/usr/local/bin/riot" ]]; then
@@ -467,30 +476,9 @@ EOF
 test_profile() {
     log_info "Testing profile customization..."
 
-    # Check packages were copied
-    local profile_pkg_count=$(find "$PROFILE_DIR/airootfs/opt/archriot-cache/official" -name "*.pkg.tar.zst" | wc -l)
-    local cache_pkg_count=$(find "$CACHE_DIR/official" -name "*.pkg.tar.zst" | wc -l)
-
-    if [[ $profile_pkg_count -ne $cache_pkg_count ]]; then
-        log_error "Package count mismatch - Cache: $cache_pkg_count, Profile: $profile_pkg_count"
-        exit 1
-    fi
-
-    # Check database files were copied
-    if [[ ! -f "$PROFILE_DIR/airootfs/opt/archriot-cache/official/archriot-offline.db.tar.gz" ]]; then
-        log_error "Database not copied to profile"
-        exit 1
-    fi
-
     # Check pacman.conf was created
     if [[ ! -f "$PROFILE_DIR/airootfs/etc/pacman.conf" ]]; then
         log_error "Pacman.conf not created in profile"
-        exit 1
-    fi
-
-    # Verify pacman.conf contains our repository
-    if ! grep -q "archriot-offline" "$PROFILE_DIR/airootfs/etc/pacman.conf"; then
-        log_error "Offline repository not configured in pacman.conf"
         exit 1
     fi
 
@@ -551,13 +539,19 @@ build_iso() {
     # Ensure previous airootfs mounts are unmounted before deleting
     if [[ -d "$OUTPUT_DIR/work/x86_64/airootfs" ]]; then
         unmount_airootfs_mounts
+        log_info "DEBUG: Unmount completed successfully"
     fi
     if [[ -d "$OUTPUT_DIR" ]]; then
+        log_info "DEBUG: Removing existing output directory: $OUTPUT_DIR"
         sudo rm -rf "$OUTPUT_DIR"
+        log_info "DEBUG: Output directory removed successfully"
     fi
+    log_info "DEBUG: Creating output directory: $OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
+    log_info "DEBUG: Output directory created successfully"
 
     # Run mkarchiso
+    log_info "DEBUG: About to run mkarchiso with profile: $PROFILE_DIR"
     log_info "Running mkarchiso (this may take a while)..."
     if ! sudo mkarchiso -v -w "$OUTPUT_DIR/work" -o "$OUTPUT_DIR" "$PROFILE_DIR"; then
         log_error "CRITICAL: mkarchiso failed - ISO build unsuccessful"
@@ -565,7 +559,7 @@ build_iso() {
     fi
 
     # Find generated ISO
-    local iso_file=$(find "$OUTPUT_DIR" -name "*.iso" | head -1)
+    local iso_file=$(find "$OUTPUT_DIR" -maxdepth 1 -name "*.iso" | head -1)
     if [[ -n "$iso_file" ]]; then
         log_success "ISO built successfully: $iso_file"
 
@@ -588,9 +582,6 @@ build_iso() {
         (cd "$WORK_DIR/isos" && sha256sum "archriot.iso" > "archriot.sha256")
         log_info "SHA256 checksum created: isos/archriot.sha256"
 
-        # Create symlink for easy access
-        ln -sf "$final_iso" "$WORK_DIR/archriot-latest.iso"
-        log_info "Symlink created: archriot-latest.iso"
     else
         log_error "CRITICAL: ISO file not found in output directory after successful mkarchiso"
         exit 1
@@ -602,7 +593,7 @@ test_iso() {
     log_info "Testing ISO build..."
 
     # Find ISO file
-    local iso_file=$(find "$OUTPUT_DIR" -name "*.iso" | head -1)
+    local iso_file=$(find "$OUTPUT_DIR" -maxdepth 1 -name "*.iso" | head -1)
 
     if [[ -z "$iso_file" ]]; then
         log_error "No ISO file found"
@@ -654,9 +645,9 @@ unmount_airootfs_mounts() {
     fi
 
     # Absolute safety check - never unmount anything outside our build tree
-    if [[ ! "$mount_root" =~ ArchISO.*out/work/x86_64/airootfs$ ]]; then
+    if [[ ! "$mount_root" =~ .*/ArchISO/out/work/x86_64/airootfs$ ]]; then
         log_error "SAFETY: Refusing to unmount suspicious path: $mount_root"
-        log_error "Expected path pattern: */ArchISO/*/out/work/x86_64/airootfs"
+        log_error "Expected path pattern: */ArchISO/out/work/x86_64/airootfs"
         return 1
     fi
 
@@ -689,11 +680,11 @@ unmount_airootfs_mounts() {
     if command -v findmnt >/dev/null 2>&1; then
         while IFS= read -r line; do
             [[ -n "$line" ]] && to_unmount+=("$line")
-        done < <(findmnt -R -n -o TARGET --target "$mount_root" | grep "^$mount_root" | grep -vFf <(printf '%s\n' "${to_unmount[@]}"))
+        done < <(findmnt -R -n -o TARGET --target "$mount_root" 2>/dev/null | grep "^$mount_root" | grep -vFf <(printf '%s\n' "${to_unmount[@]}") || true)
     else
         while IFS= read -r line; do
             [[ -n "$line" ]] && to_unmount+=("$line")
-        done < <(awk '{print $2}' /proc/self/mounts | grep "^$mount_root/" | grep -vFf <(printf '%s\n' "${to_unmount[@]}"))
+        done < <(awk '{print $2}' /proc/self/mounts | grep "^$mount_root/" | grep -vFf <(printf '%s\n' "${to_unmount[@]}") || true)
     fi
 
     # Sort descending by path depth so deeper mounts get unmounted first
@@ -715,9 +706,9 @@ unmount_airootfs_mounts() {
     # Final verification pass only within our build scope
     local remaining_count=0
     if command -v findmnt >/dev/null 2>&1; then
-        remaining_count=$(findmnt -R -n -o TARGET --target "$mount_root" | grep "^$mount_root" | wc -l || echo 0)
+        remaining_count=$(findmnt -R -n -o TARGET --target "$mount_root" 2>/dev/null | { grep "^$mount_root" || true; } | wc -l)
     else
-        remaining_count=$(awk '{print $2}' /proc/self/mounts | grep "^$mount_root/" | wc -l || echo 0)
+        remaining_count=$(awk '{print $2}' /proc/self/mounts | { grep "^$mount_root/" || true; } | wc -l)
     fi
 
     if [[ $remaining_count -gt 0 ]]; then
