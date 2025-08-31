@@ -44,7 +44,7 @@ check_root() {
     fi
 }
 
-# Prepare workspace by copying releng profile
+# Prepare workspace with minimal custom profile
 prepare_workspace() {
     log_info "Preparing workspace..."
 
@@ -54,16 +54,114 @@ prepare_workspace() {
         rm -rf "$PROFILE_DIR"
     fi
 
-    # Copy releng profile as base
-    log_info "Copying releng profile from /usr/share/archiso/configs/releng/"
-    cp -r /usr/share/archiso/configs/releng/ "$PROFILE_DIR"
+    # Create minimal profile structure instead of copying bloated releng
+    log_info "Creating minimal custom profile structure"
+    mkdir -p "$PROFILE_DIR"
+
+    # Copy essential boot configurations AND airootfs structure from releng
+    log_info "Copying essential boot configurations and airootfs from releng"
+    cp -r /usr/share/archiso/configs/releng/efiboot "$PROFILE_DIR/"
+    cp -r /usr/share/archiso/configs/releng/grub "$PROFILE_DIR/"
+    cp -r /usr/share/archiso/configs/releng/syslinux "$PROFILE_DIR/"
+    cp -r /usr/share/archiso/configs/releng/airootfs "$PROFILE_DIR/"
+
+    # Create minimal packages.x86_64 with only essential base packages
+    log_info "Creating minimal base packages.x86_64"
+    cat > "$PROFILE_DIR/packages.x86_64" << 'EOF'
+# Minimal essential packages for ArchRiot ISO
+alsa-utils
+amd-ucode
+arch-install-scripts
+archinstall
+base
+broadcom-wl
+btrfs-progs
+cryptsetup
+device-mapper
+dhcpcd
+diffutils
+dosfstools
+e2fsprogs
+edk2-shell
+efibootmgr
+exfatprogs
+gptfdisk
+intel-ucode
+iw
+iwd
+kitty-terminfo
+less
+libusb-compat
+linux
+linux-firmware
+linux-firmware-marvell
+lvm2
+man-db
+man-pages
+mkinitcpio
+mkinitcpio-archiso
+mkinitcpio-nfs-utils
+nano
+nbd
+ntfs-3g
+openssh
+parted
+pv
+rsync
+sof-firmware
+sudo
+syslinux
+tmux
+usbutils
+wireless-regdb
+wpa_supplicant
+xdg-utils
+EOF
+
+    # Create minimal pacman.conf
+    log_info "Creating build pacman.conf"
+    cp /etc/pacman.conf "$PROFILE_DIR/pacman.conf"
+
+    # Create profiledef.sh
+    log_info "Creating profiledef.sh"
+    cat > "$PROFILE_DIR/profiledef.sh" << 'EOF'
+#!/usr/bin/env bash
+# shellcheck disable=SC2034
+
+iso_name="archriot"
+iso_label="ARCHRIOT_$(date +%Y%m)"
+iso_publisher="ArchRiot Project <https://archriot.org>"
+iso_application="ArchRiot Installer ISO"
+iso_version="$(date +%Y.%m.%d)"
+install_dir="arch"
+buildmodes=('iso')
+bootmodes=('bios.syslinux.mbr' 'bios.syslinux.eltorito'
+           'uefi-ia32.systemd-boot.esp' 'uefi-x64.systemd-boot.esp'
+           'uefi-ia32.systemd-boot.eltorito' 'uefi-x64.systemd-boot.eltorito')
+arch="x86_64"
+pacman_conf="pacman.conf"
+airootfs_image_type="squashfs"
+airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M')
+file_permissions=(
+  ["/etc/shadow"]="0:0:400"
+  ["/root"]="0:0:750"
+  ["/root/.automated_script.sh"]="0:0:755"
+  ["/root/.gnupg"]="0:0:700"
+  ["/usr/local/bin/choose-mirror"]="0:0:755"
+  ["/usr/local/bin/Installation_guide"]="0:0:755"
+  ["/usr/local/bin/livecd-sound"]="0:0:755"
+)
+EOF
+
+    # Create bootstrap packages
+    cp /usr/share/archiso/configs/releng/bootstrap_packages.x86_64 "$PROFILE_DIR/"
 
     # Create cache directories
     mkdir -p "$CACHE_DIR/official"
     mkdir -p "$CACHE_DIR/aur"
     mkdir -p "$OUTPUT_DIR"
 
-    log_success "Workspace prepared"
+    log_success "Minimal workspace prepared"
 }
 
 # Test workspace preparation
@@ -107,6 +205,11 @@ test_workspace() {
 # Download required packages to local cache
 download_packages() {
     log_info "Downloading packages to cache..."
+
+    # Clear existing cache to ensure only current packages are included
+    log_info "Clearing old package cache..."
+    rm -rf "$CACHE_DIR/official"/*
+    mkdir -p "$CACHE_DIR/official"
 
     local package_list="$WORK_DIR/configs/official-packages.txt"
 
@@ -325,6 +428,16 @@ customize_profile() {
     cp -r "$CACHE_DIR/official" "$PROFILE_DIR/airootfs/opt/archriot-cache/"
     log_success "Offline repository copied to ISO"
 
+    # Create vconsole.conf to fix character encoding
+    log_info "Creating vconsole.conf for proper terminal display..."
+    cat > "$PROFILE_DIR/airootfs/etc/vconsole.conf" << 'EOF'
+# Virtual console configuration for ArchRiot ISO
+# Sets keyboard layout to US English and proper font for UTF-8 support
+
+KEYMAP=us
+FONT=ter-116n
+EOF
+
     # Copy riot installer
     if [[ -f "$WORK_DIR/airootfs/usr/local/bin/riot" ]]; then
         log_info "Copying riot installer..."
@@ -332,6 +445,15 @@ customize_profile() {
         chmod +x "$PROFILE_DIR/airootfs/usr/local/bin/riot"
     else
         log_warning "Riot installer not found at $WORK_DIR/airootfs/usr/local/bin/riot"
+    fi
+
+    # Copy riot wrapper
+    if [[ -f "$WORK_DIR/airootfs/usr/local/bin/riot-wrapper" ]]; then
+        log_info "Copying riot wrapper..."
+        cp "$WORK_DIR/airootfs/usr/local/bin/riot-wrapper" "$PROFILE_DIR/airootfs/usr/local/bin/"
+        chmod +x "$PROFILE_DIR/airootfs/usr/local/bin/riot-wrapper"
+    else
+        log_warning "Riot wrapper not found at $WORK_DIR/airootfs/usr/local/bin/riot-wrapper"
     fi
 
     # Create pacman.conf for offline repository
@@ -342,124 +464,52 @@ customize_profile() {
     else
         log_warning "airootfs/etc/pacman-offline.conf not found; generating default pacman.conf"
         cat > "$PROFILE_DIR/airootfs/etc/pacman.conf" << 'EOF'
-#
-# /etc/pacman.conf - ArchRiot Live Environment
-#
-# See the pacman.conf(5) manpage for option and repository directives
-
-#
-# GENERAL OPTIONS
-#
 [options]
-# The following paths are commented out with their default values listed.
-# If you wish to use different paths, uncomment and update the paths.
-#RootDir     = /
-#DBPath      = /var/lib/pacman/
-#CacheDir    = /var/cache/pacman/pkg/
-#LogFile     = /var/log/pacman.log
-#GPGDir      = /etc/pacman.d/gnupg/
-#HookDir     = /etc/pacman.d/hooks/
-HoldPkg     = pacman glibc
-#XferCommand = /usr/bin/curl -L -C - -f -o %o %u
-#XferCommand = /usr/bin/wget --passive-ftp -c -O %o %u
-#CleanMethod = KeepInstalled
 Architecture = auto
-
-# Pacman won't upgrade packages listed in IgnorePkg and members of IgnoreGroup
-#IgnorePkg   =
-#IgnoreGroup =
-
-#NoUpgrade   =
-#NoExtract   =
-
-# Misc options
-#UseSyslog
-#Color
-#NoProgressBar
 CheckSpace
 VerbosePkgLists
 ParallelDownloads = 5
-
-# By default, pacman accepts packages signed by keys that its local keyring
-# trusts (see pacman-key and its man page), as well as unsigned packages.
-SigLevel    = Required DatabaseOptional
+SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
 
-#RemoteFileSigLevel = Required
-
-# NOTE: You must run `pacman-key --init` before first using pacman; the local
-# keyring can then be populated with the keys of all official Arch Linux
-# packagers with `pacman-key --populate archlinux`.
-
-#
-# REPOSITORIES
-#   - can be defined here or included from another file
-#   - pacman will search repositories in the order defined here
-#   - local/custom mirrors can be added here or in separate files
-#   - repositories listed first will take precedence when packages
-#     have identical names, regardless of version number
-#   - URLs will have $repo replaced by the name of the current repo
-#   - URLs will have $arch replaced by the name of the architecture
-#
-# Repository entries are of the format:
-#       [repo-name]
-#       Server = ServerName
-#       Include = IncludePath
-#
-# The header [repo-name] is the name of the repository. It must be unique.
-# It cannot contain hyphens.
-#
-
-# Offline ArchRiot repository (highest priority)
 [archriot-offline]
 SigLevel = Optional TrustAll
 Server = file:///opt/archriot-cache/official
 
-# Standard Arch repositories (fallback when online)
 [core]
 Include = /etc/pacman.d/mirrorlist
 
 [extra]
 Include = /etc/pacman.d/mirrorlist
-
-# If you want to run 32 bit applications on your x86_64 system,
-# enable the multilib repositories as required here.
-
-#[multilib-testing]
-#Include = /etc/pacman.d/mirrorlist
-
-#[multilib]
-#Include = /etc/pacman.d/mirrorlist
-
-# An example of a custom package repository.  See the pacman manpage for
-# tips on creating your own repositories.
-#[custom]
-#SigLevel = Optional TrustAll
-#Server = file:///home/custompkgs
 EOF
     fi
+
+    # Create vconsole.conf for proper terminal/keyboard setup
+    log_info "Creating vconsole.conf for terminal environment..."
+    cat > "$PROFILE_DIR/airootfs/etc/vconsole.conf" << 'EOF'
+# Virtual console configuration for ArchRiot ISO
+# Sets keyboard layout to US English and proper font for UTF-8 support
+
+KEYMAP=us
+FONT=ter-116n
+EOF
 
     # Create and enable systemd service for auto-starting the installer
     log_info "Creating riot-installer systemd service..."
     cat > "$PROFILE_DIR/airootfs/etc/systemd/system/riot-installer.service" << 'EOF'
 [Unit]
-Description=ArchRiot Installer (TTY1)
+Description=ArchRiot Installer Prompt
+After=multi-user.target
 Conflicts=getty@tty1.service
 Before=getty@tty1.service
-After=multi-user.target
 
 [Service]
 Type=simple
-TTYPath=/dev/tty1
+ExecStart=/usr/local/bin/riot-wrapper
 StandardInput=tty
 StandardOutput=tty
-StandardError=journal+console
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
-ExecStart=/usr/local/bin/riot
-Restart=on-failure
-RestartSec=1s
+TTYPath=/dev/tty1
+Restart=no
 
 [Install]
 WantedBy=multi-user.target
@@ -563,7 +613,9 @@ build_iso() {
     if [[ -n "$iso_file" ]]; then
         log_success "ISO built successfully: $iso_file"
 
-        # Prepare final output directory
+        # Clean and prepare final output directory
+        log_info "Cleaning isos directory..."
+        rm -rf "$WORK_DIR/isos"/*
         mkdir -p "$WORK_DIR/isos"
 
         # Copy ISO to canonical path
@@ -621,17 +673,6 @@ test_iso() {
             log_error "CRITICAL: File does not appear to be a valid ISO"
             exit 1
         fi
-    fi
-
-    # Test symlink was created
-    if [[ ! -L "$WORK_DIR/archriot-latest.iso" ]]; then
-        log_error "CRITICAL: Symlink not created"
-        exit 1
-    fi
-
-    if [[ ! -f "$WORK_DIR/archriot-latest.iso" ]]; then
-        log_error "CRITICAL: Symlink is broken"
-        exit 1
     fi
 
     log_success "ISO build test passed"
@@ -775,7 +816,6 @@ main() {
     log_success "ArchRiot ISO build completed successfully!"
     log_info "ISO location: $WORK_DIR/isos/archriot.iso"
     log_info "Checksum: $WORK_DIR/isos/archriot.sha256"
-    log_info "Quick access: $WORK_DIR/archriot-latest.iso"
 }
 
 # Handle script interruption

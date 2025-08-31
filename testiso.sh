@@ -56,6 +56,12 @@ if ! command -v qemu-system-x86_64 &> /dev/null; then
     exit 1
 fi
 
+# REMOVE THE OLD FILE!
+if [ ! -f "$DISK_PATH" ]; then
+    echo "Removing stale $DISK_PATH"
+    rm -rf $DISK_PATH
+fi
+
 # Create virtual disk if it doesn't exist
 if [ ! -f "$DISK_PATH" ]; then
     print_info "Creating virtual disk: $DISK_PATH ($DISK_SIZE)"

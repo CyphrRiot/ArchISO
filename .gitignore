@@ -10,9 +10,6 @@ logs/*
 *.iso
 isos/*
 
-# do not add the plan!
-plan.md
-
 # Package cache (moved to build/)
 package_cache/
 

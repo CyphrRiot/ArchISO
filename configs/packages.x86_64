@@ -145,59 +145,44 @@ evince
 # VERIFIED from install/applications/ modules
 
 # Communication apps (communication.sh)
-signal-desktop
+# signal-desktop
 
 # Media apps (media.sh)
-lollypop
-totem
+# lollypop
+# totem
 ffmpeg
-yt-dlp
-# spotdl - AUR package, installed by ArchRiot
 
 # Productivity apps (productivity.sh)
 gnome-text-editor
-zed
-abiword
+# zed
+# abiword
 papers
 7zip
 gnome-clocks
 
 # Utilities (utilities.sh)
 btop
-# neofetch - AUR package, installed by ArchRiot
 fastfetch
 tree
 thunar-volman
 thunar-archive-plugin
-gvfs
-gvfs-mtp
-gnome-system-monitor
-# iwgtk - AUR package, installed by ArchRiot
-file-roller
-secrets
-# featherwallet-bin - AUR package, installed by ArchRiot
-fragments
+# gvfs
+# gvfs-mtp
+# gnome-system-monitor
+# iwgtk
 
 # === ARCHRIOT FONTS ===
 # VERIFIED from install/desktop/fonts.sh
-ttf-font-awesome
-noto-fonts
-noto-fonts-emoji
-noto-fonts-cjk
-noto-fonts-extra
-ttf-liberation
-ttf-hack-nerd
-ttf-jetbrains-mono-nerd
-ttf-cascadia-mono-nerd
-# ttf-ia-writer - AUR package, installed by ArchRiot
-
-# === ARCHRIOT THEMING ===
-# VERIFIED from install/desktop/theming.sh
-# bibata-cursor-theme - AUR package, installed by ArchRiot
-# kora-icon-theme - AUR package, installed by ArchRiot
-# tela-icon-theme-purple-git - AUR package, installed by ArchRiot
-gnome-themes-extra
-kvantum-qt5
+terminus-font
+woff2-font-awesome
+# noto-fonts
+# noto-fonts-emoji
+# noto-fonts-cjk
+# noto-fonts-extra
+# ttf-liberation
+# ttf-hack-nerd
+# ttf-jetbrains-mono-nerd
+# ttf-cascadia-mono-nerd
 
 # === AUDIO SYSTEM ===
 # Required for desktop audio (referenced multiple times)
