@@ -506,7 +506,7 @@ Before=getty@tty1.service
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/riot-wrapper
-StandardInput=tty
+StandardInput=tty-force
 StandardOutput=tty
 TTYPath=/dev/tty1
 Restart=no
