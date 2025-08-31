@@ -11,7 +11,8 @@ logs/*
 isos/*
 
 # Package cache (moved to build/)
-package_cache/
+package_cache/*
+archriot-profile/*
 
 # Temporary extraction directories (old locations)
 iso_extract/

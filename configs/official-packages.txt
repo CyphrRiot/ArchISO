@@ -111,5 +111,4 @@ usbutils
 vulkan-icd-loader
 vulkan-tools
 waybar
-zed
 zip
