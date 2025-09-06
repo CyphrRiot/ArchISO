@@ -14,87 +14,118 @@ That's it. Nothing else.
 
 ### ✅ What Works
 
-- **Build process** compl
-  etes successfully
+- **Build process** completes successfully
 - **Package cache** creation (184MB, clean)
-- **Riot binary** exists at `airootfs/usr/local/bin/riot`
+- **Riot binary** exists at `airootfs/usr/local/bin/riot` and is executable
 - **All required config files** exist
+- **Processor limit** fixed (-j4 flag restored to mkarchiso)
+- **SHA256 checksum** generation working
+- **Offline pacman.conf** configuration working
 
 ### ❌ Current Problem
 
-- **Getty restart loop** on boot: `[ OK ] Started Getty on tty1` repeating endlessly
-- **No shell prompt** - system hangs after "Initializes pacman keyring"
-- **Same issue persists** through all attempted fixes
+- **NOT TRULY OFFLINE** - installer still downloads packages from internet
+- **Missing linux-firmware packages** - causes downloads during installation
+- **Missing glibc and core dependencies** - forces internet downloads
+- **Package list incomplete** - doesn't match ArchRiot's full requirements
 
 ### 🗂️ Current File State
 
-- **Package list:** `configs/official-packages.txt` (105 packages)
-- **Riot installer:** `airootfs/usr/local/bin/riot` (working binary)
+- **Package list:** `configs/packages.txt` (needs to match ~/Code/ArchRiot/install/packages.txt)
+- **Riot installer:** `airootfs/usr/local/bin/riot` (working binary, executable)
 - **Config files:** All present in `configs/`
-- **Git repo:** Currently messy from multiple restore attempts
+- **Build script:** `create-iso.sh` (working, with -j4 processor limit)
+- **Cache directory:** 184MB+ of packages
 
-## 🔧 SIMPLE SOLUTION APPROACH
+## 🔧 CURRENT PROGRESS & NEXT STEPS
 
-### What We Need
+### ✅ What's Fixed
 
-1. **Clean git state** - reset to known good state
-2. **Minimal create-iso.sh** that does ONLY:
-    - Copy standard releng profile
-    - Add package cache to `/opt/archriot-cache/`
-    - Add riot binary to `/usr/local/bin/riot`
-    - Create offline pacman.conf pointing to cache
-    - **NO systemd services, NO getty overrides, NO automation**
+1. **Build script working** - creates ISO successfully
+2. **Processor limit** - restored -j4 flag to prevent system overload
+3. **Package cache** - creates offline repository with database
+4. **Riot installer** - properly executable and accessible
+5. **SHA256 checksums** - generated for ISO verification
 
-### Expected Result
+### 🎯 CRITICAL ISSUE: NOT TRULY OFFLINE
 
-- **Standard archiso boot** with autologin to root shell
-- **Manual execution:** User types `riot` to run installer
-- **Offline installation:** Uses cached packages
+**Problem:** Installer downloads packages from internet instead of using cache
 
-## 🚨 ROOT CAUSE ANALYSIS
+**Root Cause Analysis:**
 
-The getty restart loop suggests something is **crashing the boot process**, not just a getty configuration issue.
+- Package list incomplete compared to ArchRiot requirements
+- Missing linux-firmware-\* packages (huge downloads)
+- Missing glibc and core system dependencies
+- Cache doesn't contain ALL packages needed for installation
 
-**Possible causes:**
+### 🔧 PROPOSED SOLUTION: COMPLETE OFFLINE PACKAGE SET
 
-1. **Corrupted build artifacts** in current workspace
-2. **Package conflicts** or dependency issues
-3. **Systemd conflicts** from lingering service files
-4. **Build script bugs** that corrupt the ISO
+**Step 1: Get Complete Package List**
 
-## 📝 IMMEDIATE NEXT STEPS
+- Compare current packages.txt with ~/Code/ArchRiot/install/packages.txt
+- Identify ALL missing packages (especially linux-firmware-\*)
+- Add ALL linux-firmware packages to prevent downloads
 
-### 1. Clean Git State
+**Step 2: Download Complete Package Set**
 
-- Reset git to clean working state
-- Remove build artifacts (cache/, out/, etc.)
-- Identify what files actually need to be in git
+- Download ALL packages ArchRiot needs (including dependencies)
+- Include all linux-firmware-\* variants
+- Include glibc and all core system packages
+- Cache size will grow significantly but be truly offline
 
-### 2. Create Minimal Working Script
+**Step 3: Test Offline Installation**
 
-- Strip create-iso.sh to absolute basics
-- No automation, no services, no getty overrides
-- Just: releng + cache + riot + pacman.conf
+- Verify NO internet downloads during riot installation
+- Confirm all packages come from /opt/archriot-cache
+- Test on disconnected system to verify offline capability
 
-### 3. Test Minimal Build
+## 🚨 IMMEDIATE ACTION PLAN
 
-- Build with minimal script
-- If getty loop persists, it's not configuration related
-- If it works, we have the baseline
+### 1. Package List Analysis (FIRST)
 
-### 4. Debug Boot Process (If Still Broken)
+- Read ~/Code/ArchRiot/install/packages.txt
+- Compare with current configs/packages.txt
+- Identify ALL missing packages (especially linux-firmware-\*)
 
-- Enable debug logging: `loglevel=7 systemd.log_level=debug`
-- Add debug shell: `systemd.debug-shell=1` (tty9 access)
-- Capture actual boot logs to identify crash point
+### 2. Add ALL Linux Firmware Packages
 
-## 🔄 FALLBACK PLAN
+- Add linux-firmware (base)
+- Add linux-firmware-whence
+- Add all specific firmware packages ArchRiot needs
+- This should eliminate most internet downloads
 
-If minimal approach still fails:
+### 3. Add Core System Dependencies
 
-1. **Test pure releng** - build unmodified archiso to confirm base works
-2. **Add components incrementally** - cache first, then riot, then pacman.conf
-3. **Identify regression point** - find exactly what breaks it
+- Ensure glibc and all dependencies are cached
+- Add any missing core packages that force downloads
+- Include ALL transitive dependencies
+
+### 4. Test TRUE Offline Installation
+
+- Build ISO with complete package set
+- Test installation with NO internet connection
+- Verify zero downloads from internet during riot install
+
+## 📊 PACKAGE SET REQUIREMENTS
+
+### Current State
+
+- **Package count:** ~105 packages
+- **Cache size:** 184MB
+- **Status:** INCOMPLETE - causes internet downloads
+
+### Target State
+
+- **Package count:** ~300-500 packages (estimated with full firmware)
+- **Cache size:** 800MB-1.5GB (estimated)
+- **Status:** COMPLETE - truly offline installation
+
+### Critical Missing Categories
+
+1. **Linux firmware packages** (largest gap)
+2. **Core system dependencies**
+3. **ArchRiot-specific requirements**
+4. **Transitive dependencies** not automatically included
 
 ## ✅ SUCCESS CRITERIA
 
@@ -107,13 +138,24 @@ If minimal approach still fails:
 
 **NO automation, NO services, NO complexity.**
 
-## 📊 CURRENT METRICS
+## ✅ SUCCESS METRICS
 
-- **Target ISO size:** <2GB
-- **Package count:** 105 packages
+### Current Build
+
+- **ISO size:** ~800MB-1GB (with 184MB cache)
+- **Package count:** ~105 packages
 - **Cache size:** 184MB
 - **Build time:** ~45-60 minutes
+- **Offline capability:** PARTIAL (downloads still occur)
+
+### Target Build
+
+- **ISO size:** 1.5-2.5GB (with complete cache)
+- **Package count:** 300-500 packages
+- **Cache size:** 800MB-1.5GB
+- **Build time:** ~60-90 minutes
+- **Offline capability:** COMPLETE (zero downloads)
 
 ---
 
-**KEEP IT SIMPLE. ARCHISO WORKS. WE'RE JUST ADDING FILES.**
+**NEXT: MAKE IT TRULY OFFLINE BY ADDING ALL REQUIRED PACKAGES**

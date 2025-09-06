@@ -7,7 +7,27 @@
 base
 linux
 linux-firmware
+glibc
+gcc-libs
+systemd
+dbus
+linux-firmware-amdgpu
+linux-firmware-atheros
+linux-firmware-broadcom
+linux-firmware-cirrus
+linux-firmware-intel
+linux-firmware-liquidio
 linux-firmware-marvell
+linux-firmware-mediatek
+linux-firmware-mellanox
+linux-firmware-nfp
+linux-firmware-nvidia
+linux-firmware-other
+linux-firmware-qcom
+linux-firmware-qlogic
+linux-firmware-radeon
+linux-firmware-realtek
+linux-firmware-whence
 
 # === INSTALL TOOLS ===
 arch-install-scripts
@@ -62,6 +82,9 @@ file-roller
 7zip
 pciutils
 usbutils
+gzip
+tar
+util-linux
 
 # === HARDWARE SUPPORT ===
 intel-ucode
@@ -95,6 +118,11 @@ jq
 ripgrep
 lsd
 plocate
+bash-language-server
+lua-language-server
+pyright
+typescript-language-server
+gopls
 
 # === LIVE ENVIRONMENT ===
 mkinitcpio
@@ -133,6 +161,10 @@ hyprland
 xdg-desktop-portal-hyprland
 xdg-desktop-portal-gtk
 polkit-gnome
+polkit
+xdg-utils
+shared-mime-info
+desktop-file-utils
 waybar
 fuzzel
 mako
@@ -176,6 +208,9 @@ fastfetch
 power-profiles-daemon
 powertop
 system-config-printer
+fragments
+iwgtk
+raw-thumbnailer
 
 # === MEDIA AND GRAPHICS ===
 kooha
@@ -202,6 +237,13 @@ ttf-cascadia-mono-nerd
 
 # === THEMING ===
 kvantum-qt5
+bibata-cursor-theme
+kora-icon-theme
+
+# === PRINTING SUPPORT ===
+cups
+cups-pdf
+cups-filters
 
 # === SYSTEM SECURITY ===
 openssl

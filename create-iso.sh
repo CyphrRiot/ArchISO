@@ -134,7 +134,7 @@ EOF
 # Build ISO
 echo "9. Building ISO..."
 mkdir -p "$SCRIPT_DIR/out"
-sudo mkarchiso -j4 -v -w "$SCRIPT_DIR/out/work" -o "$SCRIPT_DIR/out" "$PROFILE_DIR"
+sudo mkarchiso -v -w "$SCRIPT_DIR/out/work" -o "$SCRIPT_DIR/out" "$PROFILE_DIR"
 
 # Find and move ISO
 iso_file=$(find "$SCRIPT_DIR/out" -maxdepth 1 -name "*.iso" | head -1)
