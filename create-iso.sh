@@ -40,40 +40,85 @@ if [[ ! -f "$PACKAGE_LIST" ]]; then
     exit 1
 fi
 
-# Check if we already have cached packages
-pkg_count=$(find "$CACHE_DIR/official" -name "*.pkg.tar.zst" 2>/dev/null | wc -l)
-if [[ $pkg_count -gt 100 ]]; then
-    echo "   Found $pkg_count cached packages, skipping download"
-else
-    echo "   Downloading packages to cache..."
-    # Read packages and download directly to cache
-    packages=()
-    while IFS= read -r package; do
-        [[ -z "$package" || "$package" =~ ^#.* ]] && continue
-        packages+=("$package")
-    done < "$PACKAGE_LIST"
+# Download packages to cache (handling both official and AUR)
+echo "   Downloading packages to cache..."
+packages=()
+while IFS= read -r package; do
+    [[ -z "$package" || "$package" =~ ^#.* ]] && continue
+    packages+=("$package")
+done < "$PACKAGE_LIST"
 
-    echo "   Downloading ${#packages[@]} packages to cache..."
-    mkdir -p /tmp/offlinedb /tmp/pacman-cache
-    sudo pacman --noconfirm -Syw "${packages[@]}" \
+echo "   Processing ${#packages[@]} packages..."
+mkdir -p "$CACHE_DIR/official" "$CACHE_DIR/aur"
+
+# Separate official and AUR packages
+official_packages=()
+aur_packages=()
+
+for package in "${packages[@]}"; do
+    # Check if package exists in official repos
+    if pacman -Si "$package" >/dev/null 2>&1; then
+        # Check if already cached
+        if ! find "$CACHE_DIR/official" -name "$package-*.pkg.tar.zst" | grep -q .; then
+            official_packages+=("$package")
+        fi
+    else
+        # Check if it's an AUR package and not already cached
+        if ! find "$CACHE_DIR/aur" -name "$package-*.pkg.tar.zst" | grep -q . && command -v yay >/dev/null 2>&1; then
+            if yay -Si "$package" >/dev/null 2>&1; then
+                aur_packages+=("$package")
+            else
+                echo "   WARNING: Package $package not found in official repos or AUR"
+            fi
+        fi
+    fi
+done
+
+# Download official packages
+if [[ ${#official_packages[@]} -gt 0 ]]; then
+    echo "   Downloading ${#official_packages[@]} official packages..."
+    mkdir -p /tmp/pacman-cache /tmp/offlinedb
+    sudo pacman --noconfirm -Syw "${official_packages[@]}" \
         --cachedir /tmp/pacman-cache \
         --dbpath /tmp/offlinedb
 
-    echo "   Moving packages to build cache..."
-    sudo mv /tmp/pacman-cache/*.pkg.tar.zst "$CACHE_DIR/official/"
-    sudo chown "$USER:$USER" "$CACHE_DIR/official"/*.pkg.tar.zst
+    sudo mv /tmp/pacman-cache/*.pkg.tar.zst "$CACHE_DIR/official/" 2>/dev/null || true
+    sudo chown "$USER:$USER" "$CACHE_DIR/official"/*.pkg.tar.zst 2>/dev/null || true
 fi
 
-# Create repository database
-echo "4. Creating offline repository database..."
+# Download AUR packages
+if [[ ${#aur_packages[@]} -gt 0 ]]; then
+    echo "   Downloading ${#aur_packages[@]} AUR packages..."
+    export MAKEFLAGS="-j4"
+    for aur_package in "${aur_packages[@]}"; do
+        echo "     Building AUR package: $aur_package"
+        if yay -S --noconfirm --needed --downloadonly "$aur_package" >/dev/null 2>&1; then
+            # Find and copy AUR package from yay cache
+            find "$HOME/.cache/yay" -name "$aur_package-*.pkg.tar.zst" -exec cp {} "$CACHE_DIR/aur/" \; 2>/dev/null || true
+        fi
+    done
+    sudo chown "$USER:$USER" "$CACHE_DIR/aur"/*.pkg.tar.zst 2>/dev/null || true
+fi
+
+# Create repository databases
+echo "4. Creating offline repository databases..."
 cd "$CACHE_DIR/official"
-repo-add --new archriot-cache.db.tar.gz *.pkg.tar.zst
+if ls *.pkg.tar.zst 1> /dev/null 2>&1; then
+    repo-add --new archriot-cache.db.tar.gz *.pkg.tar.zst
+fi
 cd "$SCRIPT_DIR"
 
-# Copy offline repository to ISO
-echo "5. Adding package cache to ISO..."
-mkdir -p "$PROFILE_DIR/airootfs/opt/archriot-cache"
-cp -r "$CACHE_DIR/official"/* "$PROFILE_DIR/airootfs/opt/archriot-cache/"
+if [[ -d "$CACHE_DIR/aur" ]] && ls "$CACHE_DIR/aur"/*.pkg.tar.zst 1> /dev/null 2>&1; then
+    cd "$CACHE_DIR/aur"
+    repo-add --new aur-cache.db.tar.gz *.pkg.tar.zst
+    cd "$SCRIPT_DIR"
+fi
+
+# Copy offline repositories to ISO
+echo "5. Adding package caches to ISO..."
+mkdir -p "$PROFILE_DIR/airootfs/opt/archriot-cache" "$PROFILE_DIR/airootfs/opt/aur-cache"
+cp -r "$CACHE_DIR/official"/* "$PROFILE_DIR/airootfs/opt/archriot-cache/" 2>/dev/null || true
+cp -r "$CACHE_DIR/aur"/* "$PROFILE_DIR/airootfs/opt/aur-cache/" 2>/dev/null || true
 
 # Add riot installer
 echo "6. Adding riot installer..."
@@ -103,6 +148,10 @@ VerbosePkgLists
 ParallelDownloads = 5
 SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
+
+[aur-cache]
+SigLevel = Optional TrustAll
+Server = file:///opt/aur-cache
 
 [archriot-cache]
 SigLevel = Optional TrustAll
