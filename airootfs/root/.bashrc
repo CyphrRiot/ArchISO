@@ -12,9 +12,10 @@ PS1='[\u@\h \W]\$ '
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 
-# Auto-run ArchRiot installer on login
+# ArchRiot live guidance (do not auto-start installer from bash)
 if [[ -t 0 && -t 1 && -t 2 ]]; then
-    echo "Starting ArchRiot installer..."
-    sleep 1
-    exec riot
+    echo
+    echo "Welcome to ArchRiot live environment (bash)."
+    echo "Type 'riot' to start the installer when the system is ready."
+    echo "Logs: /tmp/riot_debug.log"
 fi

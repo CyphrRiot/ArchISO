@@ -1,14 +1,7 @@
+=====================================
+    Welcome to ArchRiot Linux ISO
+=====================================
 
- █████╗ ██████╗  ██████╗██╗  ██╗██████╗ ██╗ ██████╗ ████████╗
-██╔══██╗██╔══██╗██╔════╝██║  ██║██╔══██╗██║██╔═══██╗╚══██╔══╝
-███████║██████╔╝██║     ███████║██████╔╝██║██║   ██║   ██║
-██╔══██║██╔══██╗██║     ██╔══██║██╔══██╗██║██║   ██║   ██║
-██║  ██║██║  ██║╚██████╗██║  ██║██║  ██║██║╚██████╔╝   ██║
-╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝ ╚═════╝    ╚═╝
-
-Welcome to ArchRiot Linux Live Environment!
-
-To install ArchRiot Linux, run:
-    riot
-
-For more information, visit: https://ArchRiot.org
+To install ArchRiot, type: riot
+To reboot, type: reboot
+To power off, type: poweroff

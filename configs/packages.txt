@@ -1,0 +1,207 @@
+# ArchRiot ISO - Complete Package List for Offline Installation
+# MERGED from packages.x86_64 and packages.txt
+# Contains ALL packages needed for ArchRiot base system and desktop
+# Only includes packages from official repos (no AUR packages)
+
+# === BASE SYSTEM ESSENTIALS ===
+base
+linux
+linux-firmware
+linux-firmware-marvell
+
+# === INSTALL TOOLS ===
+arch-install-scripts
+archinstall
+
+# === BOOT ESSENTIALS ===
+efibootmgr
+syslinux
+efitools
+mokutil
+sbctl
+sbsigntools
+
+# === FILESYSTEM SUPPORT ===
+cryptsetup
+device-mapper
+lvm2
+dosfstools
+e2fsprogs
+btrfs-progs
+gptfdisk
+exfatprogs
+ntfs-3g
+udisks2
+
+# === NETWORK ESSENTIALS ===
+networkmanager
+iw
+iwd
+dhcpcd
+inetutils
+ufw
+
+# === SYSTEM UTILITIES ===
+sudo
+nano
+dialog
+curl
+wget
+git
+git-lfs
+openssh
+rsync
+unzip
+zip
+tree
+less
+man-db
+man-pages
+pv
+file-roller
+7zip
+pciutils
+usbutils
+
+# === HARDWARE SUPPORT ===
+intel-ucode
+amd-ucode
+alsa-firmware
+sof-firmware
+mesa
+vulkan-icd-loader
+vulkan-tools
+
+# === TERMINAL AND SHELL ===
+kitty
+ghostty
+ghostty-shell-integration
+fish
+starship
+tmux
+neovim
+tree-sitter-vim
+
+# === DEVELOPMENT ESSENTIALS ===
+base-devel
+python
+python-pip
+python-psutil
+python-zxcvbn-rs
+bc
+fd
+fzf
+jq
+ripgrep
+lsd
+plocate
+
+# === LIVE ENVIRONMENT ===
+mkinitcpio
+mkinitcpio-archiso
+mkinitcpio-nfs-utils
+nbd
+edk2-shell
+
+# === BLUETOOTH SUPPORT ===
+bluez
+bluez-utils
+blueberry
+
+# === AUDIO SYSTEM ===
+pipewire
+pipewire-alsa
+pipewire-pulse
+pipewire-jack
+pipewire-audio
+libpipewire
+gst-plugin-pipewire
+gstreamer-vaapi
+gst-libav
+gst-plugins-base
+gst-plugins-good
+gst-plugins-bad
+gst-plugins-ugly
+wireplumber
+brightnessctl
+playerctl
+pamixer
+pavucontrol
+
+# === HYPRLAND DESKTOP CORE ===
+hyprland
+xdg-desktop-portal-hyprland
+xdg-desktop-portal-gtk
+polkit-gnome
+waybar
+fuzzel
+mako
+swaybg
+hyprlock
+hypridle
+swayosd
+grim
+slurp
+hyprshot
+hyprpicker
+hyprland-qtutils
+hyprsunset
+nwg-displays
+nwg-drawer
+
+# === DESKTOP APPLICATIONS ===
+thunar
+thunar-volman
+thunar-archive-plugin
+sushi
+ffmpegthumbnailer
+tumbler
+libwebp
+libheif
+libavif
+gnome-calculator
+gnome-disk-utility
+gnome-system-monitor
+gnome-text-editor
+gnome-themes-extra
+swaync
+mpv
+lollypop
+loupe
+ffmpeg
+papers
+gnome-clocks
+btop
+fastfetch
+power-profiles-daemon
+powertop
+system-config-printer
+
+# === MEDIA AND GRAPHICS ===
+kooha
+x264
+
+# === FILE SYSTEMS AND STORAGE ===
+gvfs
+gvfs-mtp
+gvfs-smb
+
+# === INPUT AND INTERNATIONALIZATION ===
+fcitx5
+fcitx5-gtk
+fcitx5-qt
+fcitx5-configtool
+xdg-user-dirs
+
+
+# === FONTS ===
+woff2-font-awesome
+noto-fonts-emoji
+ttf-hack-nerd
+ttf-cascadia-mono-nerd
+
+# === THEMING ===
+kvantum-qt5
+
+# === SYSTEM SECURITY ===
+openssl

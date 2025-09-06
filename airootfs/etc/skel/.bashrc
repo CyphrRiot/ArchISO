@@ -12,13 +12,6 @@ PS1='[\u@\h \W]\$ '
 alias ls='ls --color=auto'
 alias grep='grep --color=auto'
 
-# Auto-run ArchRiot installer on login
-if [[ -t 0 && -t 1 && -t 2 ]]; then
-    echo "Starting ArchRiot installer..."
-    sleep 1
-    exec riot
-fi
-
 # ArchRiot first boot setup reminder
 if [[ -f ~/.archriot-first-boot.sh ]]; then
     source ~/.archriot-first-boot.sh
