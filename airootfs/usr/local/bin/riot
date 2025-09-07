@@ -204,9 +204,7 @@ This installer will:
 
 IMPORTANT: Disk encryption (LUKS) is required and will be enabled automatically." 18 75
 
-    if ! show_dialog --yesno "Do you want to continue with the ArchRiot installation?" 8 65; then
-        exit 0
-    fi
+    # Continue with installation - final confirmation will be at disk selection
 }
 
 # Boot mode selection function
@@ -590,16 +588,7 @@ The installer will now exit." 10 50
     # Confirm selection
     DISK_INFO=$(echo "$DISKS" | grep "^$SELECTED_DISK")
 
-    if ! show_dialog --yesno "!!! FINAL WARNING !!!
-
-You selected: $DISK_INFO
-
-This disk will be COMPLETELY ERASED and partitioned for ArchRiot installation.
-
-Are you absolutely sure you want to continue?" 12 64; then
-        log "Disk selection cancelled by user"
-        exit 0
-    fi
+    # Skip this confirmation - the next one is more comprehensive
 
     SELECTED_DISK="/dev/$SELECTED_DISK"
     success "Selected disk: $SELECTED_DISK"
@@ -871,11 +860,11 @@ install_base_system() {
 
     # Configure pacman to use OFFLINE cache ONLY
     log "Configuring pacman for OFFLINE installation..."
-    
+
     # Copy the offline pacman.conf to live system for installation
     if [ -f "/opt/archriot-cache/official/archriot-offline.db.tar.gz" ]; then
         log "Using offline package repository at /opt/archriot-cache/"
-        
+
         # Create temporary pacman.conf for offline installation
         cat > /tmp/pacman-offline.conf << 'EOF'
 [options]
@@ -896,17 +885,17 @@ Include = /etc/pacman.d/mirrorlist
 [extra]
 Include = /etc/pacman.d/mirrorlist
 EOF
-        
+
         # Use offline repository for base system installation
         log "Installing base packages from offline cache..."
         if ! pacstrap -C /tmp/pacman-offline.conf /mnt base linux linux-firmware; then
             error "Failed to install base packages from offline cache"
             return 1
         fi
-        
+
     else
         warn "Offline package cache not found, falling back to online installation"
-        
+
         # Install base system packages using default mirrors
         log "Installing base packages from online mirrors..."
         if ! pacstrap /mnt base linux linux-firmware; then

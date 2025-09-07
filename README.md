@@ -37,12 +37,12 @@ ArchRiot is a pre-configured Arch Linux system featuring:
 2. Build the ISO (requires sudo):
 
     ```bash
-    sudo ./build-iso.sh
+    sudo ./create-iso.sh
     ```
 
 3. Find your ISO in:
     ```
-    isos/archriot-2025.iso
+    isos/archriot.iso
     ```
 
 ## Creating Installation Media
@@ -52,15 +52,9 @@ ArchRiot is a pre-configured Arch Linux system featuring:
 1. Install [Ventoy](https://www.ventoy.net/) on a USB drive
 2. Copy the ISO file to the Ventoy drive:
     ```bash
-    cp isos/archriot-*.iso /path/to/ventoy/drive/
+    cp isos/archriot*.iso /path/to/ventoy/drive/
     ```
 3. Boot from Ventoy and select the ArchRiot ISO
-
-### Direct USB Flashing
-
-```bash
-sudo dd if=isos/archriot-*.iso of=/dev/sdX bs=4M status=progress oflag=sync
-```
 
 **Note:** The build script can automatically copy to Ventoy drives when detected.
 
@@ -69,7 +63,7 @@ Replace `/dev/sdX` with your USB device (use `lsblk` to find it).
 ### Virtual Machine
 
 ```bash
-./testiso.sh  # Launches QEMU for testing
+./test-iso.sh  # Launches QEMU for testing
 ```
 
 ## Installation Process

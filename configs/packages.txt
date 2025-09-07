@@ -16,15 +16,8 @@ linux-firmware-atheros
 linux-firmware-broadcom
 linux-firmware-cirrus
 linux-firmware-intel
-linux-firmware-liquidio
-linux-firmware-marvell
-linux-firmware-mediatek
-linux-firmware-mellanox
 linux-firmware-nfp
 linux-firmware-nvidia
-linux-firmware-other
-linux-firmware-qcom
-linux-firmware-qlogic
 linux-firmware-radeon
 linux-firmware-realtek
 linux-firmware-whence
@@ -68,7 +61,7 @@ dialog
 curl
 wget
 git
-git-lfs
+#git-lfs
 openssh
 rsync
 unzip
@@ -79,7 +72,6 @@ man-db
 man-pages
 pv
 file-roller
-7zip
 pciutils
 usbutils
 gzip
@@ -102,15 +94,15 @@ ghostty-shell-integration
 fish
 starship
 tmux
-neovim
-tree-sitter-vim
+#neovim
+#tree-sitter-vim
 
 # === DEVELOPMENT ESSENTIALS ===
-base-devel
-python
-python-pip
-python-psutil
-python-zxcvbn-rs
+# base-devel
+#python
+#python-pip
+#python-psutil
+#python-zxcvbn-rs
 bc
 fd
 fzf
@@ -118,11 +110,7 @@ jq
 ripgrep
 lsd
 plocate
-bash-language-server
-lua-language-server
-pyright
-typescript-language-server
-gopls
+
 
 # === LIVE ENVIRONMENT ===
 mkinitcpio
@@ -132,9 +120,9 @@ nbd
 edk2-shell
 
 # === BLUETOOTH SUPPORT ===
-bluez
-bluez-utils
-blueberry
+#bluez
+#bluez-utils
+#blueberry
 
 # === AUDIO SYSTEM ===
 pipewire
@@ -145,76 +133,73 @@ pipewire-audio
 libpipewire
 gst-plugin-pipewire
 gstreamer-vaapi
-gst-libav
-gst-plugins-base
-gst-plugins-good
-gst-plugins-bad
-gst-plugins-ugly
-wireplumber
-brightnessctl
-playerctl
-pamixer
-pavucontrol
+#gst-libav
+#gst-plugins-base
+#gst-plugins-good
+#gst-plugins-bad
+#gst-plugins-ugly
+#wireplumber
+#brightnessctl
+#playerctl
+#pamixer
+#pavucontrol
 
 # === HYPRLAND DESKTOP CORE ===
-hyprland
-xdg-desktop-portal-hyprland
-xdg-desktop-portal-gtk
-polkit-gnome
-polkit
+# --- will be installed with archriot full installer for window manager ---
+#hyprland
+#xdg-desktop-portal-hyprland
+#xdg-desktop-portal-gtk
+#polkit-gnome
+#polkit
 xdg-utils
-shared-mime-info
-desktop-file-utils
-waybar
-fuzzel
-mako
-swaybg
-hyprlock
-hypridle
-swayosd
-grim
-slurp
-hyprshot
-hyprpicker
-hyprland-qtutils
-hyprsunset
-nwg-displays
-nwg-drawer
+#shared-mime-info
+#desktop-file-utils
+#waybar
+#fuzzel
+#mako
+#swaybg
+#hyprlock
+#hypridle
+#swayosd
+#grim
+#slurp
+#hyprshot
+#hyprpicker
+#hyprland-qtutils
+#hyprsunset
+#nwg-displays
+#nwg-drawer
 
 # === DESKTOP APPLICATIONS ===
-thunar
-thunar-volman
-thunar-archive-plugin
-sushi
-ffmpegthumbnailer
-tumbler
-libwebp
-libheif
-libavif
-gnome-calculator
-gnome-disk-utility
-gnome-system-monitor
-gnome-text-editor
-gnome-themes-extra
-swaync
-mpv
-lollypop
-loupe
-ffmpeg
-papers
-gnome-clocks
+#thunar
+#thunar-volman
+#thunar-archive-plugin
+#sushi
+#ffmpegthumbnailer
+#tumbler
+#libwebp
+#libheif
+#libavif
+#gnome-calculator
+#gnome-disk-utility
+#gnome-system-monitor
+#gnome-text-editor
+#gnome-themes-extra
+#swaync
+#mpv
+#lollypop
+
+#papers
+#gnome-clocks
 btop
 fastfetch
 power-profiles-daemon
 powertop
 system-config-printer
-fragments
-iwgtk
-raw-thumbnailer
 
 # === MEDIA AND GRAPHICS ===
-kooha
-x264
+#kooha
+#x264
 
 # === FILE SYSTEMS AND STORAGE ===
 gvfs
@@ -222,12 +207,7 @@ gvfs-mtp
 gvfs-smb
 
 # === INPUT AND INTERNATIONALIZATION ===
-fcitx5
-fcitx5-gtk
-fcitx5-qt
-fcitx5-configtool
 xdg-user-dirs
-
 
 # === FONTS ===
 woff2-font-awesome
@@ -236,14 +216,7 @@ ttf-hack-nerd
 ttf-cascadia-mono-nerd
 
 # === THEMING ===
-kvantum-qt5
-bibata-cursor-theme
-kora-icon-theme
-
-# === PRINTING SUPPORT ===
-cups
-cups-pdf
-cups-filters
+#kvantum-qt5
 
 # === SYSTEM SECURITY ===
 openssl

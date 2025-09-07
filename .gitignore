@@ -1,3 +1,5 @@
+plan.md
+
 # Build artifacts and temporary files
 build/
 build/**/*
@@ -5,6 +7,15 @@ build/**/*
 
 # NO LOGS!!!
 logs/*
+
+# No "out" files!
+out/*
+
+# No cache files
+cache/*
+
+# No work files
+work/*
 
 # NO ISOS in git!
 *.iso
@@ -50,3 +61,4 @@ temp_uuid_fix/
 ehthumbs.db
 Thumbs.db
 build/
+plan.md
