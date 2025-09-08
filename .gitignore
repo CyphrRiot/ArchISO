@@ -1,5 +1,3 @@
-plan.md
-
 # Build artifacts and temporary files
 build/
 build/**/*
@@ -17,13 +15,18 @@ cache/*
 # No work files
 work/*
 
+# New make-iso.sh build artifacts
+.work/
+.offlinedb/
+.buildcache/
+tmp-pacman.conf
+
 # NO ISOS in git!
 *.iso
 isos/*
 
 # Package cache (moved to build/)
 package_cache/*
-archriot-profile/*
 
 
 # Temporary extraction directories (old locations)
@@ -62,3 +65,6 @@ ehthumbs.db
 Thumbs.db
 build/
 plan.md
+
+# Avoid committing build-time cache injected by the script
+archriot-profile/airootfs/opt/archriot-cache/

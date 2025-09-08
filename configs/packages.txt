@@ -11,16 +11,17 @@ glibc
 gcc-libs
 systemd
 dbus
-linux-firmware-amdgpu
-linux-firmware-atheros
-linux-firmware-broadcom
+#linux-firmware-amdgpu
+#linux-firmware-atheros
+#linux-firmware-broadcom
 linux-firmware-cirrus
 linux-firmware-intel
 linux-firmware-nfp
-linux-firmware-nvidia
-linux-firmware-radeon
+#linux-firmware-nvidia
+#linux-firmware-radeon
 linux-firmware-realtek
 linux-firmware-whence
+iwd
 
 # === INSTALL TOOLS ===
 arch-install-scripts
@@ -47,7 +48,7 @@ ntfs-3g
 udisks2
 
 # === NETWORK ESSENTIALS ===
-networkmanager
+# networkmanager
 iw
 iwd
 dhcpcd
@@ -68,15 +69,16 @@ unzip
 zip
 tree
 less
-man-db
-man-pages
-pv
-file-roller
+#man-db
+#man-pages
+#pv
+#file-roller
 pciutils
 usbutils
 gzip
 tar
 util-linux
+zsh
 
 # === HARDWARE SUPPORT ===
 intel-ucode
@@ -98,11 +100,11 @@ tmux
 #tree-sitter-vim
 
 # === DEVELOPMENT ESSENTIALS ===
-# base-devel
-#python
-#python-pip
-#python-psutil
-#python-zxcvbn-rs
+base-devel
+python
+python-pip
+# python-psutil
+# python-zxcvbn-rs
 bc
 fd
 fzf
@@ -110,7 +112,6 @@ jq
 ripgrep
 lsd
 plocate
-
 
 # === LIVE ENVIRONMENT ===
 mkinitcpio
@@ -120,9 +121,9 @@ nbd
 edk2-shell
 
 # === BLUETOOTH SUPPORT ===
-#bluez
-#bluez-utils
-#blueberry
+bluez
+bluez-utils
+blueberry
 
 # === AUDIO SYSTEM ===
 pipewire
@@ -131,44 +132,44 @@ pipewire-pulse
 pipewire-jack
 pipewire-audio
 libpipewire
-gst-plugin-pipewire
-gstreamer-vaapi
+#gst-plugin-pipewire
+#gstreamer-vaapi
 #gst-libav
 #gst-plugins-base
 #gst-plugins-good
 #gst-plugins-bad
 #gst-plugins-ugly
 #wireplumber
-#brightnessctl
+brightnessctl
 #playerctl
 #pamixer
 #pavucontrol
 
 # === HYPRLAND DESKTOP CORE ===
 # --- will be installed with archriot full installer for window manager ---
-#hyprland
-#xdg-desktop-portal-hyprland
-#xdg-desktop-portal-gtk
-#polkit-gnome
-#polkit
+hyprland
+xdg-desktop-portal-hyprland
+xdg-desktop-portal-gtk
+polkit-gnome
+polkit
 xdg-utils
-#shared-mime-info
-#desktop-file-utils
-#waybar
-#fuzzel
-#mako
-#swaybg
-#hyprlock
-#hypridle
-#swayosd
+shared-mime-info
+desktop-file-utils
+waybar
+fuzzel
+mako
+swaybg
+hyprlock
+hypridle
+swayosd
 #grim
 #slurp
-#hyprshot
+hyprshot
 #hyprpicker
 #hyprland-qtutils
-#hyprsunset
-#nwg-displays
-#nwg-drawer
+hyprsunset
+nwg-displays
+nwg-drawer
 
 # === DESKTOP APPLICATIONS ===
 #thunar
@@ -183,19 +184,19 @@ xdg-utils
 #gnome-calculator
 #gnome-disk-utility
 #gnome-system-monitor
-#gnome-text-editor
+# gnome-text-editor
 #gnome-themes-extra
 #swaync
 #mpv
 #lollypop
 
-#papers
+papers
 #gnome-clocks
-btop
+#btop
 fastfetch
 power-profiles-daemon
 powertop
-system-config-printer
+#system-config-printer
 
 # === MEDIA AND GRAPHICS ===
 #kooha
@@ -211,12 +212,15 @@ xdg-user-dirs
 
 # === FONTS ===
 woff2-font-awesome
-noto-fonts-emoji
-ttf-hack-nerd
-ttf-cascadia-mono-nerd
+#noto-fonts-emoji
+#ttf-hack-nerd
+#ttf-cascadia-mono-nerd
 
 # === THEMING ===
-#kvantum-qt5
+# kvantum-qt5
+#bibata-cursor-theme
+#kora-icon-theme
+# gnome-themes-extra
 
 # === SYSTEM SECURITY ===
 openssl

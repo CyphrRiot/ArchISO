@@ -1,0 +1,2 @@
+bibata-cursor-theme
+kora-icon-theme

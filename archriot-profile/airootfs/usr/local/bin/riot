@@ -1,0 +1,1792 @@
+#!/bin/bash
+
+# ArchRiot Automated Installer
+# A simple TUI installer that automates the ArchRiot installation process
+# Following the exact guidelines from ArchRiot README.md
+
+set -e
+
+# Debug mode - set to 1 to enable debug output
+DEBUG_MODE="${DEBUG_MODE:-0}"
+
+
+
+# Tokyo Night theme colors for output
+RED='\033[38;5;203m'      # Tokyo Night red
+GREEN='\033[38;5;158m'    # Tokyo Night green
+YELLOW='\033[38;5;221m'   # Tokyo Night yellow
+BLUE='\033[38;5;116m'     # Tokyo Night cyan
+PURPLE='\033[38;5;183m'   # Tokyo Night purple
+ORANGE='\033[38;5;215m'   # Tokyo Night orange
+GRAY='\033[38;5;59m'      # Tokyo Night comment gray
+NC='\033[0m' # No Color
+
+# Global variables
+SELECTED_DISK=""
+EFI_PARTITION=""
+ROOT_PARTITION=""
+USERNAME=""
+PASSWORD=""
+ROOT_PASSWORD=""
+LUKS_PASSWORD=""
+HOSTNAME=""
+WIFI_INTERFACE=""
+SELECTED_TIMEZONE=""
+SELECTED_KEYBOARD=""
+BOOT_MODE=""
+ARCHINSTALL_CONFIG="/tmp/archriot-config.json"
+ARCHINSTALL_CREDS="/tmp/archriot-creds.json"
+
+# Logging functions with Tokyo Night styling
+log() {
+    echo -e "${GRAY}[$(date '+%H:%M:%S')]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[✗ ERROR]${NC} $1"
+}
+
+success() {
+    echo -e "${GREEN}[✓ SUCCESS]${NC} $1"
+}
+
+warn() {
+    echo -e "${ORANGE}[⚠ WARNING]${NC} $1"
+}
+
+# Hash password using libcrypt (same method as archinstall)
+hash_password() {
+    local password="$1"
+    # Use Python ctypes to call libcrypt.so directly (same as archinstall)
+    python3 -c "
+import ctypes
+import sys
+
+# Get password from command line argument (safer than string interpolation)
+password = sys.argv[1]
+
+# Load libcrypt
+libcrypt = ctypes.CDLL('libcrypt.so')
+libcrypt.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+libcrypt.crypt.restype = ctypes.c_char_p
+libcrypt.crypt_gensalt.argtypes = [ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p, ctypes.c_int]
+libcrypt.crypt_gensalt.restype = ctypes.c_char_p
+
+# Generate yescrypt salt (rounds=5, same as archinstall default)
+salt = libcrypt.crypt_gensalt(b'\$y\$', 5, None, 0)
+if not salt:
+    raise ValueError('crypt_gensalt() returned NULL')
+
+# Hash the password
+password_bytes = password.encode('utf-8')
+result = libcrypt.crypt(password_bytes, salt)
+if not result:
+    raise ValueError('crypt() returned NULL')
+
+print(result.decode('utf-8'))
+" "$password"
+}
+
+# Check if whiptail is available, fallback to basic prompts
+if ! command -v whiptail &> /dev/null; then
+    USE_DIALOG=false
+else
+    USE_DIALOG=true
+fi
+
+# Dialog wrapper functions
+show_dialog() {
+    if $USE_DIALOG; then
+        # Handle different dialog types appropriately
+        case "$1" in
+            --infobox)
+                # Infobox doesn't need input redirection
+                # Always return 0 for infobox since it's non-interactive
+                whiptail "$@" || true
+                return 0
+                ;;
+            *)
+                # Other dialogs need full terminal access
+                whiptail "$@"
+                local exit_code=$?
+                return $exit_code
+                ;;
+        esac
+    else
+        # Fallback for basic prompts
+        case "$1" in
+            --msgbox)
+                echo "$3"
+                read -p "Press Enter to continue..."
+                ;;
+            --yesno)
+                while true; do
+                    read -p "$3 (y/n): " yn
+                    case $yn in
+                        [Yy]* ) return 0;;
+                        [Nn]* ) return 1;;
+                        * ) echo "Please answer yes or no.";;
+                    esac
+                done
+                ;;
+            --infobox)
+                echo "$3"
+                ;;
+        esac
+    fi
+}
+
+input_dialog() {
+    if $USE_DIALOG; then
+        whiptail --inputbox "$1" 12 60 3>&1 1>&2 2>&3
+    else
+        read -p "$1: " input
+        echo "$input"
+    fi
+}
+
+password_dialog() {
+    if $USE_DIALOG; then
+        whiptail --passwordbox "$1" 12 60 3>&1 1>&2 2>&3
+    else
+        read -s -p "$1: " password
+        echo
+        echo "$password"
+    fi
+}
+
+menu_dialog() {
+    local title="$1"
+    local text="$2"
+    shift 2
+
+    # Safety check for empty menu arrays
+    if [ $# -eq 0 ]; then
+        error "menu_dialog called with no menu items"
+        echo ""
+        return 1
+    fi
+
+    if $USE_DIALOG; then
+        whiptail --menu "$title" 15 60 8 "$@" 3>&1 1>&2 2>&3
+    else
+        echo "$text"
+        echo
+        local i=1
+        while [ $# -gt 0 ]; do
+            echo "$i) $2"
+            shift 2
+            i=$((i + 1))
+        done
+        echo
+        read -p "Select option (1-$((i-1))): " choice
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -lt "$i" ]; then
+            echo "$choice"
+        else
+            echo ""
+        fi
+    fi
+}
+
+# Welcome screen
+show_welcome() {
+    clear
+    show_dialog --msgbox "ArchRiot Installer
+
+Welcome to the ArchRiot automated installer!
+
+This installer will:
+- Set up WiFi (if needed)
+- Select installation disk
+- Configure user account
+- Install Arch Linux with ArchRiot-optimized settings
+- Install ArchRiot desktop environment
+
+IMPORTANT: Disk encryption (LUKS) is required and will be enabled automatically." 18 75
+
+    if ! show_dialog --yesno "Do you want to continue with the ArchRiot installation?" 8 65; then
+        exit 0
+    fi
+}
+
+# Boot mode selection function
+select_boot_mode() {
+    log "Selecting boot mode..."
+
+    local boot_options=(
+        "UEFI" "Modern UEFI systems (systemd-boot) - Recommended"
+        "VM" "Virtual Machine or older systems (GRUB)"
+    )
+
+    BOOT_MODE=$(menu_dialog "Boot Mode Selection" "Select your boot mode:" "${boot_options[@]}")
+
+    if [ -z "$BOOT_MODE" ]; then
+        error "Boot mode selection cancelled"
+        exit 1
+    fi
+
+    success "Selected boot mode: $BOOT_MODE"
+
+    if [ "$BOOT_MODE" = "UEFI" ]; then
+        log "Will use systemd-boot for UEFI systems"
+    else
+        log "Will use GRUB for VM/legacy systems"
+    fi
+}
+
+# Check internet connectivity
+check_internet() {
+    if ping -c 1 google.com &>/dev/null || ping -c 1 8.8.8.8 &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# WiFi setup function
+setup_wifi() {
+    local retry_count=${1:-0}
+    local max_retries=3
+
+    # Prevent infinite loops
+    if [ $retry_count -ge $max_retries ]; then
+        error "WiFi setup failed after $max_retries attempts"
+        show_dialog --msgbox "WiFi Setup Failed
+
+Unable to connect to WiFi after multiple attempts.
+Please check your network or use ethernet connection.
+
+The installer will exit." 10 60
+        exit 1
+    fi
+
+    # Check if already connected
+    if check_internet; then
+        return 0
+    fi
+
+    # Check for wireless interfaces
+    WIFI_INTERFACES=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || echo "")
+
+    if [ -z "$WIFI_INTERFACES" ]; then
+        if show_dialog --yesno "No WiFi interfaces found.
+
+Do you have an ethernet connection?
+• Yes: Continue with ethernet
+• No: Exit installer
+
+Continue with ethernet connection?" 12 60; then
+            if ! check_internet; then
+                show_dialog --msgbox "No internet connection available via ethernet. Please check your connection." 8 60
+                exit 1
+            fi
+            return 0
+        else
+            exit 1
+        fi
+    fi
+
+    # Use first WiFi interface
+    WIFI_INTERFACE=$(echo "$WIFI_INTERFACES" | head -1)
+
+    # Show user feedback during network scanning
+    show_dialog --infobox "Scanning for WiFi networks...
+
+This may take 5-10 seconds.
+Please wait..." 8 50
+
+    # Scan for networks
+    iwctl station "$WIFI_INTERFACE" scan </dev/null >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        if show_dialog --yesno "WiFi scan failed on interface $WIFI_INTERFACE. Check hardware or try ethernet.
+
+Retry scan?" 8 60; then
+            setup_wifi $((retry_count + 1))
+            return
+        else
+            if ! check_internet; then
+                show_dialog --msgbox "No internet connection available. Cannot proceed with installation." 8 60
+                exit 1
+            fi
+            return 0
+        fi
+    fi
+    sleep 5
+
+    # Get available networks - SIMPLE and RELIABLE
+
+
+    # Get currently connected network to filter it out
+    CURRENT_NETWORK=$(iwctl station "$WIFI_INTERFACE" show </dev/null 2>/dev/null | grep "Connected network" | awk '{print $3}' | tr -d '*')
+
+    # Get available networks
+    RAW_OUTPUT=$(iwctl station "$WIFI_INTERFACE" get-networks </dev/null 2>&1)
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Raw iwctl output: $RAW_OUTPUT" >&2
+        echo "DEBUG: Currently connected to: '$CURRENT_NETWORK'" >&2
+    fi
+
+    # Parse networks and filter out current connection and empty lines
+    NETWORKS=$(echo "$RAW_OUTPUT" | grep -E "(psk|open|8021x)" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*>[[:space:]]*//' | sed 's/^[[:space:]]*//' | awk '{print $1}' | grep -v '^$' | grep -v "^$CURRENT_NETWORK$" | sed '/^$/d' | head -10)
+
+    if [ -z "$NETWORKS" ]; then
+        if [ "$DEBUG_MODE" = "1" ]; then
+            echo "DEBUG: No networks parsed. Raw output was: $RAW_OUTPUT" >&2
+        fi
+        if show_dialog --yesno "No WiFi networks found.
+
+This could happen if:
+• WiFi is disabled
+• No networks are in range
+• WiFi adapter needs time to initialize
+
+Do you want to:
+• Yes: Retry scanning for networks
+• No: Continue without WiFi (requires ethernet)
+
+Retry WiFi scan?" 15 60; then
+            setup_wifi $((retry_count + 1))
+            return
+        else
+            if ! check_internet; then
+                show_dialog --msgbox "No internet connection available. Cannot proceed with installation." 8 60
+                exit 1
+            fi
+            return 0
+        fi
+    fi
+
+
+
+    # Create menu items for dialog
+    MENU_ITEMS=()
+    i=1
+    while IFS= read -r network; do
+        log "DEBUG: Processing network line: '$network' (length: $(echo -n "$network" | wc -c))"
+        if [ -n "$network" ] && [ "$network" != "Available" ] && [ "$network" != "networks" ]; then
+            log "DEBUG: Adding to menu: '$i' '$network'"
+            MENU_ITEMS+=("$i" "$network")
+            i=$((i + 1))
+        else
+            log "DEBUG: Skipping network: '$network'"
+        fi
+    done <<< "$NETWORKS"
+
+    log "DEBUG: WiFi menu has ${#MENU_ITEMS[@]} total items (should be even number)"
+    for ((j=0; j<${#MENU_ITEMS[@]}; j+=2)); do
+        log "DEBUG: Menu item $((j/2+1)): '${MENU_ITEMS[j]}' -> '${MENU_ITEMS[j+1]}'"
+    done
+
+    # Count networks accurately after filtering for debug logging
+    NETWORK_COUNT=$((${#MENU_ITEMS[@]} / 2))
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Found $NETWORK_COUNT networks: $(echo "$NETWORKS" | tr '\n' ', ')" >&2
+    fi
+
+    if [ ${#MENU_ITEMS[@]} -eq 0 ]; then
+        warn "No menu items created for WiFi networks"
+        if show_dialog --yesno "No valid WiFi networks found after scanning.
+
+Do you want to:
+- Yes: Retry WiFi setup
+- No: Continue without WiFi (requires ethernet)
+
+Retry?" 12 60; then
+            setup_wifi $((retry_count + 1))
+            return
+        else
+            if ! check_internet; then
+                show_dialog --msgbox "No internet connection available. Cannot proceed with installation." 8 60
+                exit 1
+            fi
+            return 0
+        fi
+    fi
+
+    # Show network selection menu
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: MENU_ITEMS array has ${#MENU_ITEMS[@]} items:" >&2
+        for ((i=0; i<${#MENU_ITEMS[@]}; i+=2)); do
+            echo "DEBUG: MENU_ITEMS[$i]='${MENU_ITEMS[i]}' MENU_ITEMS[$((i+1))]='${MENU_ITEMS[i+1]}'" >&2
+        done
+    fi
+
+    SELECTION=$(menu_dialog "WiFi Networks" "Select a WiFi network:" "${MENU_ITEMS[@]}")
+
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Raw selection result: '$SELECTION'" >&2
+    fi
+
+    if [ -z "$SELECTION" ]; then
+        if show_dialog --yesno "No WiFi network selected.
+
+Do you want to:
+• Yes: Retry WiFi setup
+• No: Continue without WiFi (requires ethernet connection)
+
+Retry WiFi setup?" 12 60; then
+            setup_wifi $((retry_count + 1))
+            return
+        else
+            if ! check_internet; then
+                show_dialog --msgbox "No internet connection available. Cannot proceed with installation." 8 60
+                exit 1
+            fi
+            return 0
+        fi
+    fi
+
+    # Validate selection is a number
+    if ! [[ "$SELECTION" =~ ^[0-9]+$ ]]; then
+        show_dialog --msgbox "Invalid network selection: '$SELECTION'" 8 50
+        exit 1
+    fi
+
+    # Debug: Show networks list for verification
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Full NETWORKS list:" >&2
+        echo "$NETWORKS" | nl >&2
+        echo "DEBUG: Total network lines: $(echo "$NETWORKS" | wc -l)" >&2
+    fi
+
+    # Get selected network name
+    SELECTED_NETWORK=$(echo "$NETWORKS" | sed -n "${SELECTION}p" 2>/dev/null | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+
+    if [ "$DEBUG_MODE" = "1" ]; then
+        echo "DEBUG: Selected network (line $SELECTION): '$SELECTED_NETWORK'" >&2
+    fi
+
+    if [ -z "$SELECTED_NETWORK" ]; then
+        if [ "$DEBUG_MODE" = "1" ]; then
+            echo "DEBUG: Failed to get network at line $SELECTION" >&2
+            echo "DEBUG: Available lines in NETWORKS:" >&2
+            echo "$NETWORKS" | cat -n >&2
+        fi
+        show_dialog --msgbox "Invalid network selection: selection $SELECTION out of range" 8 60
+        exit 1
+    fi
+
+    # Get password
+    WIFI_PASSWORD=$(password_dialog "Enter password for '$SELECTED_NETWORK'")
+
+    # Show connection timing warning
+    show_dialog --msgbox " -=- Network Connection -=-
+
+Please wait at least 10 seconds for the network connection after pressing ENTER (for OK).
+
+The connection process may take some time to complete." 10 60
+
+    if [ -z "$WIFI_PASSWORD" ]; then
+        # Try connecting without password (open network)
+        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK" </dev/null >/dev/null 2>&1
+    else
+        # Connect with password
+        iwctl station "$WIFI_INTERFACE" connect "$SELECTED_NETWORK" --passphrase "$WIFI_PASSWORD" </dev/null >/dev/null 2>&1
+    fi
+
+    # Wait a moment and check connection
+    sleep 5
+
+    if check_internet; then
+        return 0
+    else
+        if show_dialog --yesno "WiFi Connection Failed
+
+Failed to connect to '$SELECTED_NETWORK'.
+
+This could be due to:
+• Incorrect password
+• Network issues
+• Signal strength problems
+
+Do you want to:
+• Yes: Retry WiFi setup
+• No: Continue without WiFi (requires ethernet)
+
+Retry WiFi setup?" 15 60; then
+            setup_wifi $((retry_count + 1))
+            return
+        else
+            warn "Continuing without WiFi - checking ethernet connection"
+            if ! check_internet; then
+                error "No internet connection available. Cannot proceed with installation."
+                exit 1
+            fi
+            return 0
+        fi
+    fi
+}
+
+# Disk selection function
+select_disk() {
+    # Scanning disks silently to avoid disrupting TUI
+
+    # Detect boot device to exclude it from installation options
+    BOOT_DEVICE=""
+    # Check for mounted boot devices (USB drives, etc.)
+    for mount_point in $(mount | grep -E '^/dev/(sd|nvme|vd)' | awk '{print $1}' | sed 's/[0-9]*$//' | sort -u); do
+        # Check if this device contains the running system
+        if mount | grep -q "$mount_point.*\(rw\|ro\).*archiso"; then
+            BOOT_DEVICE=$(basename "$mount_point")
+            break
+        fi
+    done
+
+    # If no archiso mount found, check for removable media
+    if [ -z "$BOOT_DEVICE" ]; then
+        BOOT_DEVICE=$(lsblk -dno NAME,RM,TRAN | awk '$2==1 && $3=="usb" {print $1}' | head -1)
+    fi
+
+    # Boot device detection handled silently
+
+    # Get list of disks (excluding loop devices, ram, boot device, etc.)
+    if [ -n "$BOOT_DEVICE" ]; then
+        DISKS=$(lsblk -dno NAME,SIZE,MODEL | grep -E '^(sd|nvme|vd|hd)' | grep -v "^$BOOT_DEVICE " | head -10)
+    else
+        DISKS=$(lsblk -dno NAME,SIZE,MODEL | grep -E '^(sd|nvme|vd|hd)' | head -10)
+    fi
+
+    if [ -z "$DISKS" ]; then
+        error "No suitable disks found for installation"
+        if [ -n "$BOOT_DEVICE" ]; then
+            error "Only boot device /dev/$BOOT_DEVICE detected - cannot install to boot device"
+        fi
+        exit 1
+    fi
+
+    # Create menu items
+    MENU_ITEMS=()
+    while IFS= read -r disk_line; do
+        if [ -n "$disk_line" ]; then
+            DISK_NAME=$(echo "$disk_line" | awk '{print $1}')
+            DISK_INFO="$disk_line"
+            MENU_ITEMS+=("$DISK_NAME" "$DISK_INFO")
+            log "DEBUG: Added disk: $DISK_NAME - $DISK_INFO"
+        fi
+    done <<< "$DISKS"
+
+    log "DEBUG: Total menu items: ${#MENU_ITEMS[@]}"
+    if [ ${#MENU_ITEMS[@]} -eq 0 ]; then
+        error "No suitable disks found for installation"
+        exit 1
+    fi
+
+    # Show disk selection menu
+    SELECTED_DISK=$(menu_dialog "Disk Selection" "WARNING: Selected disk will be COMPLETELY ERASED!
+
+Select installation disk:" "${MENU_ITEMS[@]}")
+
+    if [ -z "$SELECTED_DISK" ]; then
+        show_dialog --msgbox "Installation Cancelled
+
+No disk was selected for installation.
+
+A disk must be selected to install ArchRiot.
+The installer will now exit." 10 50
+        log "Installation cancelled - no disk selected"
+        exit 1
+    fi
+
+    # Confirm selection
+    DISK_INFO=$(echo "$DISKS" | grep "^$SELECTED_DISK")
+
+    if ! show_dialog --yesno "!!! FINAL WARNING !!!
+
+You selected: $DISK_INFO
+
+This disk will be COMPLETELY ERASED and partitioned for ArchRiot installation.
+
+Are you absolutely sure you want to continue?" 12 64; then
+        log "Disk selection cancelled by user"
+        exit 0
+    fi
+
+    SELECTED_DISK="/dev/$SELECTED_DISK"
+    success "Selected disk: $SELECTED_DISK"
+}
+
+# Disk partitioning function with GPT and proper alignment
+partition_disk() {
+    log "Partitioning disk: $SELECTED_DISK"
+
+    # Check if selected disk exists
+    if [ ! -b "$SELECTED_DISK" ]; then
+        error "Selected disk $SELECTED_DISK does not exist as block device"
+        log "Available devices:"
+        lsblk
+        return 1
+    fi
+
+    # Get disk size for validation
+    local disk_size_bytes=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
+    local disk_size_gb=$((disk_size_bytes / 1024 / 1024 / 1024))
+
+    # Validate disk size (minimum 8GB)
+    if [ $disk_size_gb -lt 8 ]; then
+        error "Disk too small: ${disk_size_gb}GB (minimum 8GB required)"
+        return 1
+    fi
+
+    # Confirm disk selection
+    if ! show_dialog --yesno "FINAL WARNING
+
+This will COMPLETELY ERASE all data on:
+$SELECTED_DISK (${disk_size_gb}GB)
+
+Are you absolutely sure you want to continue?
+
+This action CANNOT be undone!" 12 60; then
+        error "Disk partitioning cancelled by user"
+        return 1
+    fi
+
+    # DEBUG MARKER: Prove this function actually runs
+    echo "PARTITION_DISK_FUNCTION_EXECUTED_$(date)" >> /tmp/riot_debug.log
+    echo "SELECTED_DISK=$SELECTED_DISK" >> /tmp/riot_debug.log
+
+    log "Preparing disk for partitioning..."
+
+    # Unmount any existing partitions
+    umount "${SELECTED_DISK}"* 2>/dev/null || true
+
+    # Wipe disk signatures
+    wipefs -af "$SELECTED_DISK" 2>/dev/null || true
+
+    # Create GPT partition table
+    log "Creating GPT partition table..."
+    if ! parted -s "$SELECTED_DISK" mklabel gpt; then
+        error "Failed to create GPT partition table"
+        echo "PARTITION_TABLE_CREATION_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "PARTITION_TABLE_CREATED" >> /tmp/riot_debug.log
+
+    # Create partitions with proper 1 MiB alignment
+    log "Creating EFI partition (1GB)..."
+    if ! parted -s "$SELECTED_DISK" mkpart primary fat32 1MiB 1025MiB; then
+        error "Failed to create EFI partition"
+        echo "EFI_PARTITION_CREATION_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    if ! parted -s "$SELECTED_DISK" set 1 esp on; then
+        error "Failed to set ESP flag on EFI partition"
+        echo "ESP_FLAG_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "EFI_PARTITION_CREATED" >> /tmp/riot_debug.log
+
+    log "Creating root partition (remaining space)..."
+    if ! parted -s "$SELECTED_DISK" mkpart primary ext4 1025MiB 100%; then
+        error "Failed to create root partition"
+        echo "ROOT_PARTITION_CREATION_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "ROOT_PARTITION_CREATED" >> /tmp/riot_debug.log
+
+    # Wait for kernel to recognize partitions
+    sleep 2
+    partprobe "$SELECTED_DISK"
+    sync
+    sleep 2
+    echo "PARTITIONS_FINALIZED" >> /tmp/riot_debug.log
+
+    # Set partition variables
+    if [[ "$SELECTED_DISK" == *"nvme"* ]] || [[ "$SELECTED_DISK" == *"mmcblk"* ]]; then
+        EFI_PARTITION="${SELECTED_DISK}p1"
+        ROOT_PARTITION="${SELECTED_DISK}p2"
+    else
+        EFI_PARTITION="${SELECTED_DISK}1"
+        ROOT_PARTITION="${SELECTED_DISK}2"
+    fi
+
+    # Verify partitions exist
+    if [ ! -b "$EFI_PARTITION" ] || [ ! -b "$ROOT_PARTITION" ]; then
+        error "Failed to create partitions"
+        return 1
+    fi
+
+    success "Partitioning complete:"
+    success "  EFI partition: $EFI_PARTITION (1GB)"
+    success "  Root partition: $ROOT_PARTITION (${disk_size_gb}GB - 1GB)"
+
+    return 0
+}
+
+# LUKS encryption setup function
+setup_luks() {
+    echo "SETUP_LUKS_STARTED_$(date)" >> /tmp/riot_debug.log
+    echo "ROOT_PARTITION=$ROOT_PARTITION" >> /tmp/riot_debug.log
+    log "Setting up LUKS encryption on root partition..."
+
+    # Verify LUKS password was collected
+    if [ -z "$LUKS_PASSWORD" ]; then
+        error "LUKS password not set"
+        echo "LUKS_PASSWORD_NOT_SET" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "LUKS_PASSWORD_VERIFIED" >> /tmp/riot_debug.log
+
+    # User will see real progress via log() output
+
+    log "Formatting $ROOT_PARTITION with LUKS..."
+
+    # Format partition with LUKS2
+    echo -n "$LUKS_PASSWORD" | cryptsetup luksFormat --type luks2 \
+        --cipher aes-xts-plain64 \
+        --key-size 512 \
+        --hash sha512 \
+        --pbkdf argon2id \
+        --use-random \
+        "$ROOT_PARTITION" -
+
+    if [ $? -ne 0 ]; then
+        error "Failed to format LUKS partition"
+        return 1
+    fi
+
+    log "Opening LUKS partition..."
+
+    # Open the LUKS partition
+    echo -n "$LUKS_PASSWORD" | cryptsetup open "$ROOT_PARTITION" cryptroot -
+
+    if [ $? -ne 0 ]; then
+        error "Failed to open LUKS partition"
+        return 1
+    fi
+
+    # Store the original encrypted partition for bootloader UUID detection
+    LUKS_PARTITION="$ROOT_PARTITION"
+
+    # Update ROOT_PARTITION to point to the mapped device
+    ROOT_PARTITION="/dev/mapper/cryptroot"
+
+    success "LUKS encryption setup complete"
+    success "  Encrypted partition: $ROOT_PARTITION"
+
+    return 0
+}
+
+# Filesystem formatting function
+# Format filesystems function
+format_filesystems() {
+    echo "FORMAT_FILESYSTEMS_STARTED_$(date)" >> /tmp/riot_debug.log
+    echo "EFI_PARTITION=$EFI_PARTITION" >> /tmp/riot_debug.log
+    log "Formatting filesystems..."
+
+    # Format EFI partition as FAT32
+    log "Formatting EFI partition..."
+    if ! mkfs.fat -F32 -n "EFI" "$EFI_PARTITION"; then
+        error "Failed to format EFI partition"
+        echo "EFI_FORMAT_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "EFI_FORMAT_SUCCESS" >> /tmp/riot_debug.log
+
+    # Format root partition as BTRFS with compression
+    log "Formatting root partition ($ROOT_PARTITION) as BTRFS with compression..."
+    if ! mkfs.btrfs -f -L "ARCHRIOT" "$ROOT_PARTITION"; then
+        error "Failed to format root partition"
+        echo "ROOT_FORMAT_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "ROOT_FORMAT_SUCCESS" >> /tmp/riot_debug.log
+
+    success "Filesystem formatting complete"
+    success "  EFI: FAT32 ($EFI_PARTITION)"
+    success "  Root: BTRFS with compression ($ROOT_PARTITION)"
+
+    echo "FORMAT_FILESYSTEMS_COMPLETE" >> /tmp/riot_debug.log
+    return 0
+}
+
+# Mount system function with btrfs subvolumes and compression
+mount_system() {
+    echo "MOUNT_SYSTEM_STARTED_$(date)" >> /tmp/riot_debug.log
+    log "Mounting filesystems with btrfs subvolumes..."
+
+    # Create mount directory
+    mkdir -p /mnt
+
+    # Mount root btrfs filesystem temporarily to create subvolumes
+    log "Creating btrfs subvolumes..."
+    if ! mount "$ROOT_PARTITION" /mnt; then
+        error "Failed to mount root partition for subvolume creation"
+        echo "MOUNT_ROOT_FOR_SUBVOL_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "ROOT_MOUNTED_FOR_SUBVOL" >> /tmp/riot_debug.log
+
+    # Create btrfs subvolumes (default structure)
+    if ! btrfs subvolume create /mnt/@; then
+        error "Failed to create @ subvolume"
+        echo "SUBVOL_ROOT_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    btrfs subvolume create /mnt/@home
+    btrfs subvolume create /mnt/@var
+    btrfs subvolume create /mnt/@tmp
+    btrfs subvolume create /mnt/@.snapshots
+    echo "SUBVOLUMES_CREATED" >> /tmp/riot_debug.log
+
+    # Unmount to remount with proper subvolumes and compression
+    umount /mnt
+
+    # Mount root subvolume with compression
+    log "Mounting root subvolume with compression..."
+    mount -o compress=zstd,subvol=@ "$ROOT_PARTITION" /mnt
+
+    # Create mount points for other subvolumes
+    mkdir -p /mnt/{home,var,tmp,.snapshots,boot}
+
+    # Mount other subvolumes with compression
+    mount -o compress=zstd,subvol=@home "$ROOT_PARTITION" /mnt/home
+    mount -o compress=zstd,subvol=@var "$ROOT_PARTITION" /mnt/var
+    mount -o compress=zstd,subvol=@tmp "$ROOT_PARTITION" /mnt/tmp
+    mount -o compress=zstd,subvol=@.snapshots "$ROOT_PARTITION" /mnt/.snapshots
+
+    # Mount EFI partition
+    log "Mounting EFI partition..."
+    mount "$EFI_PARTITION" /mnt/boot
+
+    # Verify all mounts
+    if ! mountpoint -q /mnt || ! mountpoint -q /mnt/boot; then
+        error "Failed to mount filesystems"
+        return 1
+    fi
+
+    success "Filesystem mounting complete"
+    success "  Root: BTRFS @ subvolume with zstd compression"
+    success "  Home: BTRFS @home subvolume with zstd compression"
+    success "  Var: BTRFS @var subvolume with zstd compression"
+    success "  Boot: FAT32 EFI partition"
+
+    return 0
+}
+
+# Base system installation function
+# Install base system function
+install_base_system() {
+    echo "INSTALL_BASE_SYSTEM_STARTED_$(date)" >> /tmp/riot_debug.log
+    log "Installing base Arch Linux system..."
+
+    # Configure pacman mirrors for faster downloads
+    log "Configuring package mirrors..."
+    log "Using timezone to determine best mirrors..."
+
+    # Map timezone to reflector country names
+    case "$SELECTED_TIMEZONE" in
+        *US*|*America/New_York*|*America/Chicago*|*America/Denver*|*America/Los_Angeles*) COUNTRY="United States" ;;
+        *Europe/London*|*Europe/Belfast*) COUNTRY="United Kingdom" ;;
+        *Europe/Berlin*|*Europe/Munich*) COUNTRY="Germany" ;;
+        *Europe/Paris*) COUNTRY="France" ;;
+        *Europe/Madrid*) COUNTRY="Spain" ;;
+        *Europe/Rome*) COUNTRY="Italy" ;;
+        *Europe/Amsterdam*) COUNTRY="Netherlands" ;;
+        *Australia*) COUNTRY="Australia" ;;
+        *Asia/Tokyo*) COUNTRY="Japan" ;;
+        *Canada*) COUNTRY="Canada" ;;
+        *) COUNTRY="United States" ;; # Safe fallback
+    esac
+
+    log "Selected country for mirrors: $COUNTRY"
+    log "Finding fastest mirrors (this may take 1-2 minutes)..."
+    log "You will see reflector output below:"
+    echo
+
+    if reflector --country "$COUNTRY" --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist; then
+        log "Mirror configuration completed successfully"
+    else
+        warn "Failed to update mirrors for $COUNTRY, using worldwide mirrors"
+        reflector --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist || {
+            warn "Reflector failed entirely, using default mirrors"
+        }
+    fi
+
+    # Install base system packages
+    log "Installing base packages (linux, base, linux-firmware)..."
+    if ! pacstrap /mnt base linux linux-firmware; then
+        error "Failed to install base packages"
+        return 1
+    fi
+
+    # Install essential packages for ArchRiot
+    log "Installing essential system packages..."
+    if ! pacstrap /mnt \
+        base-devel \
+        iwd \
+        dhcpcd \
+        sudo \
+        nano \
+        git \
+        curl \
+        wget \
+        intel-ucode \
+        amd-ucode \
+        efibootmgr \
+        btrfs-progs; then
+        error "Failed to install essential packages"
+        return 1
+    fi
+
+    # Install audio system (pipewire as per ArchRiot settings)
+    log "Installing audio system (pipewire)..."
+    if ! pacstrap /mnt \
+        pipewire \
+        pipewire-alsa \
+        pipewire-pulse \
+        pipewire-jack \
+        wireplumber; then
+        error "Failed to install audio packages"
+        return 1
+    fi
+
+    success "Base system installation complete"
+    return 0
+}
+
+# System configuration function using collected user settings
+configure_system() {
+    log "Configuring system with user settings..."
+
+    # Generate fstab
+    log "Generating fstab..."
+    genfstab -U /mnt >> /mnt/etc/fstab
+
+    # Configure system settings in chroot
+    arch-chroot /mnt /bin/bash << EOF
+# Set timezone
+ln -sf /usr/share/zoneinfo/$SELECTED_TIMEZONE /etc/localtime
+hwclock --systohc
+
+# Set locale
+echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+
+# Set keyboard layout
+echo "KEYMAP=$SELECTED_KEYBOARD" > /etc/vconsole.conf
+
+# Set hostname
+echo "$HOSTNAME" > /etc/hostname
+
+# Configure hosts file
+cat > /etc/hosts << HOSTS_EOF
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $HOSTNAME.localdomain $HOSTNAME
+HOSTS_EOF
+
+# Enable iwd and dhcpcd
+systemctl enable iwd
+systemctl enable dhcpcd
+systemctl start dhcpcd
+
+# Enable audio services
+systemctl --user enable pipewire pipewire-pulse wireplumber
+
+# Create user account
+useradd -m -G wheel -s /bin/bash "$USERNAME"
+
+# Set user password
+echo "$USERNAME:$PASSWORD" | chpasswd
+
+# Set root password
+echo "root:$ROOT_PASSWORD" | chpasswd
+
+# Configure passwordless sudo for wheel group (proper approach)
+sed -i 's/^# %wheel ALL=(ALL:ALL) NOPASSWD: ALL/%wheel ALL=(ALL:ALL) NOPASSWD: ALL/' /etc/sudoers
+
+# Configure LUKS in mkinitcpio
+sed -i 's/^HOOKS=.*/HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block encrypt filesystems fsck)/' /etc/mkinitcpio.conf
+
+# Regenerate initramfs
+mkinitcpio -P
+EOF
+
+    if [ $? -ne 0 ]; then
+        error "System configuration failed"
+        return 1
+    fi
+
+    success "System configuration complete"
+    success "  Timezone: $SELECTED_TIMEZONE"
+    success "  Locale: en_US.UTF-8"
+    success "  Keyboard: $SELECTED_KEYBOARD"
+    success "  Hostname: $HOSTNAME"
+    success "  User: $USERNAME (with sudo access)"
+    success "  Audio: pipewire enabled"
+    success "  Network: iwd+dhcpcd enabled"
+
+    return 0
+}
+
+# Bootloader installation function with systemd-boot or GRUB based on boot mode
+install_bootloader() {
+    echo "INSTALL_BOOTLOADER_STARTED_$(date)" >> /tmp/riot_debug.log
+    echo "BOOT_MODE=$BOOT_MODE" >> /tmp/riot_debug.log
+
+    if [ "$BOOT_MODE" = "UEFI" ]; then
+        echo "USING_SYSTEMD_BOOT" >> /tmp/riot_debug.log
+        install_systemd_boot
+    else
+        echo "USING_GRUB" >> /tmp/riot_debug.log
+        install_grub
+    fi
+}
+
+# Install systemd-boot for UEFI systems
+install_systemd_boot() {
+    echo "SYSTEMD_BOOT_INSTALL_STARTED" >> /tmp/riot_debug.log
+    log "Installing systemd-boot bootloader for UEFI..."
+
+    # Install systemd-boot to EFI partition
+    if ! arch-chroot /mnt bootctl install; then
+        error "Failed to install systemd-boot"
+        echo "BOOTCTL_INSTALL_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "BOOTCTL_INSTALL_SUCCESS" >> /tmp/riot_debug.log
+
+    # Get the UUID of the encrypted root partition (the LUKS container)
+    local root_uuid=$(blkid -s UUID -o value "$LUKS_PARTITION")
+    echo "LUKS_UUID=$root_uuid" >> /tmp/riot_debug.log
+
+    # Create systemd-boot loader configuration
+    log "Configuring systemd-boot..."
+    arch-chroot /mnt /bin/bash << EOF
+# Configure systemd-boot
+cat > /boot/loader/loader.conf << LOADER_EOF
+default archlinux.conf
+timeout 5
+console-mode max
+editor no
+LOADER_EOF
+
+# Create boot entry for ArchRiot
+cat > /boot/loader/entries/archlinux.conf << ENTRY_EOF
+title   ArchRiot Linux
+linux   /vmlinuz-linux
+initrd  /intel-ucode.img
+initrd  /amd-ucode.img
+initrd  /initramfs-linux.img
+options cryptdevice=UUID=$root_uuid:cryptroot root=/dev/mapper/cryptroot rootflags=subvol=@ rw quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3
+ENTRY_EOF
+EOF
+
+    if [ $? -ne 0 ]; then
+        error "Failed to configure systemd-boot"
+        echo "SYSTEMD_BOOT_CONFIG_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "SYSTEMD_BOOT_CONFIG_SUCCESS" >> /tmp/riot_debug.log
+
+    success "Bootloader installation complete"
+    success "  Bootloader: systemd-boot"
+    success "  LUKS support: enabled"
+    success "  Boot timeout: 5 seconds"
+
+    echo "SYSTEMD_BOOT_COMPLETE" >> /tmp/riot_debug.log
+    return 0
+}
+
+# Install GRUB for VM/legacy systems
+install_grub() {
+    echo "GRUB_INSTALL_STARTED" >> /tmp/riot_debug.log
+    log "Installing GRUB bootloader for VM/legacy systems..."
+
+    # Install GRUB packages
+    if ! pacstrap /mnt grub efibootmgr; then
+        error "Failed to install GRUB packages"
+        echo "GRUB_PACKAGES_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "GRUB_PACKAGES_INSTALLED" >> /tmp/riot_debug.log
+
+    # Get the UUID of the encrypted root partition (the LUKS container)
+    local root_uuid=$(blkid -s UUID -o value "$LUKS_PARTITION")
+    echo "GRUB_LUKS_UUID=$root_uuid" >> /tmp/riot_debug.log
+
+    # Configure GRUB for LUKS
+    log "Configuring GRUB for LUKS..."
+    arch-chroot /mnt /bin/bash << EOF
+# Configure GRUB for LUKS encryption
+sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 rd.systemd.show_status=auto rd.udev.log_level=3"/' /etc/default/grub
+sed -i 's/^GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX="cryptdevice=UUID=$root_uuid:cryptroot root=\/dev\/mapper\/cryptroot rootflags=subvol=@"/' /etc/default/grub
+
+# Enable cryptodisk for GRUB
+echo 'GRUB_ENABLE_CRYPTODISK=y' >> /etc/default/grub
+
+# Install GRUB to EFI with fallback bootloader
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=ArchRiot --removable
+
+# Generate GRUB config
+grub-mkconfig -o /boot/grub/grub.cfg
+EOF
+
+    if [ $? -ne 0 ]; then
+        error "Failed to configure GRUB"
+        echo "GRUB_CONFIG_FAILED" >> /tmp/riot_debug.log
+        return 1
+    fi
+    echo "GRUB_CONFIG_SUCCESS" >> /tmp/riot_debug.log
+
+    success "Bootloader installation complete"
+    success "  Bootloader: GRUB"
+    success "  LUKS support: enabled"
+    success "  EFI target: x86_64-efi"
+
+    echo "GRUB_INSTALL_COMPLETE" >> /tmp/riot_debug.log
+    return 0
+}
+
+# User setup function
+setup_user() {
+    log "Setting up user account..."
+
+    # Get hostname
+    HOSTNAME=$(input_dialog "Enter hostname for this computer")
+    while [ -z "$HOSTNAME" ] || [[ ! "$HOSTNAME" =~ ^[a-zA-Z0-9-]+$ ]]; do
+        HOSTNAME=$(input_dialog "Invalid hostname. Enter hostname (letters, numbers, hyphens only)")
+    done
+
+    # Get username
+    USERNAME=$(input_dialog "Enter username")
+    while [ -z "$USERNAME" ] || [[ ! "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; do
+        USERNAME=$(input_dialog "Invalid username. Enter username (lowercase, start with letter)")
+    done
+
+    # Show password policy info
+    show_dialog --msgbox "Password Setup
+
+For simplicity, the same password will be used for:
+• Your user account ($USERNAME)
+• Root account (admin access)
+
+This reduces the number of passwords you need to remember." 10 60
+
+    # Get user password (will be used for both user and root)
+    PASSWORD=$(password_dialog "Enter password for $USERNAME and root")
+    while [ -z "$PASSWORD" ] || [ ${#PASSWORD} -lt 6 ]; do
+        PASSWORD=$(password_dialog "Password too short. Enter password (minimum 6 characters)")
+    done
+
+    # Confirm password
+    PASSWORD_CONFIRM=$(password_dialog "Confirm password")
+    while [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; do
+        warn "Passwords do not match"
+        PASSWORD=$(password_dialog "Enter password for $USERNAME and root")
+        PASSWORD_CONFIRM=$(password_dialog "Confirm password")
+    done
+
+    # Use same password for root
+    ROOT_PASSWORD="$PASSWORD"
+
+    # Get LUKS encryption password
+    LUKS_PASSWORD=$(password_dialog "Enter disk encryption (LUKS) password")
+    while [ -z "$LUKS_PASSWORD" ] || [ ${#LUKS_PASSWORD} -lt 8 ]; do
+        LUKS_PASSWORD=$(password_dialog "Encryption password too short. Enter password (minimum 8 characters)")
+    done
+
+    # Confirm LUKS password
+    LUKS_PASSWORD_CONFIRM=$(password_dialog "Confirm disk encryption password")
+    while [ "$LUKS_PASSWORD" != "$LUKS_PASSWORD_CONFIRM" ]; do
+        warn "Encryption passwords do not match"
+        LUKS_PASSWORD=$(password_dialog "Enter disk encryption (LUKS) password")
+        LUKS_PASSWORD_CONFIRM=$(password_dialog "Confirm disk encryption password")
+    done
+
+    success "User configuration complete"
+    log "Hostname: $HOSTNAME"
+    log "Username: $USERNAME"
+}
+
+# Create archinstall configuration
+create_archinstall_config() {
+    log "Creating archinstall configuration..."
+
+    # Hash passwords for security (using yescrypt like Arch Linux)
+    log "Hashing passwords..."
+    HASHED_PASSWORD=$(hash_password "$PASSWORD")
+    HASHED_ROOT_PASSWORD=$(hash_password "$ROOT_PASSWORD")
+
+    # Calculate dynamic partition sizes based on selected disk
+    DISK_SIZE_BYTES=$(lsblk -dno SIZE "$SELECTED_DISK" --bytes)
+
+    # Calculate aligned partition boundaries (exact format from working archinstall)
+    # Boot partition: 1 MiB start, 1 GiB size
+    BOOT_START_BYTES=1048576  # 1 MiB in bytes
+    BOOT_SIZE_GIB=1           # 1 GiB
+
+    # Root partition: starts after boot partition
+    ROOT_START_BYTES=1074790400  # 1025 MiB in bytes (1048576 + 1073741824)
+    ROOT_SIZE_BYTES=$((DISK_SIZE_BYTES - ROOT_START_BYTES - 1048576))  # Remaining space minus GPT backup
+
+    # Generate unique partition IDs
+    BOOT_ID=$(uuidgen)
+    ROOT_ID=$(uuidgen)
+
+    # Create main configuration file
+    cat > "$ARCHINSTALL_CONFIG" << EOF
+{
+    "archinstall-language": "English",
+    "audio_config": {
+        "audio": "pipewire"
+    },
+    "bootloader": "Systemd-boot",
+    "custom_commands": [],
+    "disk_config": {
+        "btrfs_options": {
+            "snapshot_config": null
+        },
+        "config_type": "default_layout",
+        "device_modifications": [
+            {
+                "device": "$SELECTED_DISK",
+                "partitions": [
+                    {
+                        "btrfs": [],
+                        "dev_path": null,
+                        "flags": ["boot"],
+                        "fs_type": "fat32",
+                        "mount_options": [],
+                        "mountpoint": "/boot",
+                        "obj_id": "$BOOT_ID",
+                        "size": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "GiB",
+                            "value": $BOOT_SIZE_GIB
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": $BOOT_START_BYTES
+                        },
+                        "status": "create",
+                        "type": "primary"
+                    },
+                    {
+                        "btrfs": [],
+                        "dev_path": null,
+                        "flags": [],
+                        "fs_type": "btrfs",
+                        "mount_options": ["compress=zstd"],
+                        "mountpoint": "/",
+                        "obj_id": "$ROOT_ID",
+                        "size": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": $ROOT_SIZE_BYTES
+                        },
+                        "start": {
+                            "sector_size": {
+                                "unit": "B",
+                                "value": 512
+                            },
+                            "unit": "B",
+                            "value": $ROOT_START_BYTES
+                        },
+                        "status": "create",
+                        "type": "primary"
+                    }
+                ],
+                "wipe": true
+            }
+        ],
+        "disk_encryption": {
+            "encryption_type": "luks",
+            "partitions": ["$ROOT_ID"],
+            "lvm_volumes": []
+        }
+    },
+    "hostname": "$HOSTNAME",
+    "kernels": [
+        "linux"
+    ],
+    "locale_config": {
+        "kb_layout": "$SELECTED_KEYBOARD",
+        "sys_enc": "UTF-8",
+        "sys_lang": "en_US.UTF-8"
+    },
+
+    "network_config": {
+        "type": "iso"
+    },
+    "ntp": true,
+    "packages": [
+        "wget", "curl", "git", "base-devel", "networkmanager", "iwd"
+    ],
+    "parallel_downloads": 0,
+    "services": [],
+    "swap": false,
+    "timezone": "$SELECTED_TIMEZONE",
+    "version": null
+}
+EOF
+
+    # Create separate credentials file with secure permissions
+    umask 077
+    cat > "$ARCHINSTALL_CREDS" << EOF
+{
+    "users": [
+        {
+            "username": "$USERNAME",
+            "enc_password": "$HASHED_PASSWORD",
+            "sudo": true
+        }
+    ],
+    "root_enc_password": "$HASHED_ROOT_PASSWORD",
+    "encryption_password": "$LUKS_PASSWORD"
+}
+EOF
+    umask 022
+
+    success "Configuration file created: $ARCHINSTALL_CONFIG"
+    success "Credentials file created: $ARCHINSTALL_CREDS"
+}
+
+# Run archinstall
+run_archinstall() {
+    log "Starting ArchRiot installation..."
+
+    show_dialog --msgbox "Starting Installation
+
+The ArchRiot installation will now begin.
+This process may take 10-15 minutes depending on your internet speed.
+
+The installer will:
+- Partition and encrypt $SELECTED_DISK
+- Install base Arch Linux system
+- Configure bootloader and user account
+- Install ArchRiot desktop environment
+- Set up networking and audio
+
+You will see real progress updates!" 14 70
+
+    # Execute our disk operations in sequence
+    log "=== DISK PREPARATION PHASE ==="
+
+    if ! partition_disk; then
+        error "Disk partitioning failed"
+        exit 1
+    fi
+
+    if ! setup_luks; then
+        error "LUKS encryption setup failed"
+        exit 1
+    fi
+
+    if ! format_filesystems; then
+        error "Filesystem formatting failed"
+        exit 1
+    fi
+
+    if ! mount_system; then
+        error "Filesystem mounting failed"
+        exit 1
+    fi
+
+    log "=== BASE SYSTEM INSTALLATION PHASE ==="
+
+    if ! install_base_system; then
+        error "Base system installation failed"
+        exit 1
+    fi
+
+    if ! configure_system; then
+        error "System configuration failed"
+        exit 1
+    fi
+
+    if ! install_bootloader; then
+        error "Bootloader installation failed"
+        exit 1
+    fi
+
+    log "=== ARCHRIOT DESKTOP INSTALLATION PHASE ==="
+
+    # Install ArchRiot desktop environment
+    log "Installing ArchRiot desktop environment..."
+
+    # Note: ArchRiot desktop will be installed on first boot
+    warn "ArchRiot desktop will be installed automatically on first boot"
+    warn "The system will reboot with a fully configured ArchRiot desktop"
+
+    success "=== BASE INSTALLATION COMPLETE ==="
+    success "ArchRiot Linux base system installation finished successfully!"
+}
+
+# Install ArchRiot welcome message for first boot
+install_archriot() {
+    log "Setting up ArchRiot first-boot installation..."
+
+    # Transfer WiFi credentials to new system (if any exist)
+    transfer_wifi_credentials
+
+    # Create ArchRiot auto-installer for first boot
+    arch-chroot /mnt /bin/bash -c "
+# Create first-boot ArchRiot installer
+mkdir -p /usr/local/bin
+cat > /usr/local/bin/archriot-first-boot << 'FIRSTBOOT_EOF'
+#!/bin/bash
+
+# ArchRiot First Boot Installation
+clear
+echo
+echo \"Welcome to ArchRiot Linux!\"
+echo \"=========================\"
+echo
+echo \"Installing ArchRiot desktop environment...\"
+echo \"This will take a few minutes.\"
+echo
+
+# Check internet connectivity
+if ! curl -fs --connect-timeout 5 https://ArchRiot.org > /dev/null 2>&1; then
+    echo
+    echo "No internet connection detected. Attempting to start dhcpcd..."
+    sudo systemctl start dhcpcd
+    sleep 5
+    # Check again
+    if curl -fs --connect-timeout 5 https://ArchRiot.org > /dev/null 2>&1; then
+        echo "Network connection established. Continuing..."
+    else
+        echo "Failed to establish connection. Please check your network."
+        read -p "Press Enter to continue to shell..."
+        exit 1
+    fi
+fi
+
+# Install ArchRiot desktop
+if curl -fsSL https://ArchRiot.org/setup.sh | bash; then
+    echo
+    echo \"ArchRiot desktop installation complete!\"
+    echo \"Rebooting to ArchRiot desktop...\"
+    sleep 3
+    # Remove this script so it doesn't run again
+    rm -f /usr/local/bin/archriot-first-boot
+    systemctl reboot
+else
+    echo
+    echo \"ArchRiot installation failed.\"
+    echo \"You can run this again later with:\"
+    echo \"  curl -fsSL https://ArchRiot.org/setup.sh | bash\"
+    echo
+    read -p \"Press Enter to continue to shell...\"
+fi
+FIRSTBOOT_EOF
+
+chmod +x /usr/local/bin/archriot-first-boot
+
+# Add to user's bashrc to run on first login
+echo '/usr/local/bin/archriot-first-boot' >> /home/$USERNAME/.bashrc
+"
+
+    success "ArchRiot first-boot installer configured"
+}
+
+# Transfer WiFi credentials to new system
+transfer_wifi_credentials() {
+    log "Transferring WiFi credentials to new system..."
+
+    local transferred=0
+
+    # Prefer NetworkManager if present
+    if [ -d "/etc/NetworkManager/system-connections" ]; then
+        # Create target directory
+        mkdir -p /mnt/etc/NetworkManager/system-connections
+
+        # Copy connection files
+        if ls /etc/NetworkManager/system-connections/* >/dev/null 2>&1; then
+            cp /etc/NetworkManager/system-connections/* /mnt/etc/NetworkManager/system-connections/ 2>/dev/null || true
+
+            # Sanitize interface-specific binds (ensure autoconnect on any iface)
+            arch-chroot /mnt /bin/bash -c "
+                sed -i -e '/^interface-name=/d' -e '/^mac-address=/d' /etc/NetworkManager/system-connections/*.nmconnection 2>/dev/null || true
+                chown root:root /etc/NetworkManager/system-connections/* 2>/dev/null || true
+                chmod 600 /etc/NetworkManager/system-connections/* 2>/dev/null || true
+                systemctl enable NetworkManager
+            "
+
+            success "WiFi credentials (NetworkManager) transferred to new system"
+            transferred=1
+        else
+            log "No WiFi connections to transfer via NetworkManager"
+        fi
+    else
+        log "No NetworkManager connections found"
+    fi
+
+    # Fallback: iwd (if NM did not provide credentials)
+    # Copy PSKs and also create NM keyfiles so NetworkManager autoconnects after reboot
+    if [ $transferred -eq 0 ] && [ -d "/var/lib/iwd" ] && ls /var/lib/iwd/*.psk >/dev/null 2>&1; then
+        mkdir -p /mnt/var/lib/iwd
+        cp -a /var/lib/iwd/*.psk /mnt/var/lib/iwd/ 2>/dev/null || true
+        arch-chroot /mnt /bin/bash -c "
+            chown root:root /var/lib/iwd/*.psk 2>/dev/null || true
+            chmod 600 /var/lib/iwd/*.psk 2>/dev/null || true
+        "
+        # Derive NM connections from iwd PSKs
+        for f in /var/lib/iwd/*.psk; do
+            [ -f "$f" ] || continue
+            ssid=$(basename "$f" .psk)
+            pass=$(awk -F= '/^Passphrase=/{print $2}' "$f" | head -1)
+            if [ -z "$pass" ]; then
+                pass=$(awk -F= '/^PreSharedKey=/{print $2}' "$f" | head -1)
+            fi
+            if [ -n "$ssid" ] && [ -n "$pass" ]; then
+                # Try nmcli first
+                arch-chroot /mnt /bin/bash -lc "nmcli connection add type wifi ifname '*' con-name '$ssid' ssid '$ssid' wifi-sec.key-mgmt wpa-psk wifi-sec.psk '$pass' autoconnect yes 2>/dev/null || nmcli connection modify '$ssid' wifi-sec.psk '$pass' 2>/dev/null || true"
+                # If no NM keyfile exists, write a minimal .nmconnection file directly
+                if ! arch-chroot /mnt /bin/bash -lc "test -f \"/etc/NetworkManager/system-connections/$ssid.nmconnection\""; then
+                    arch-chroot /mnt /bin/bash -lc "
+                        mkdir -p /etc/NetworkManager/system-connections
+                        cat > \"/etc/NetworkManager/system-connections/$ssid.nmconnection\" <<'NMEOF'
+[connection]
+id=$ssid
+type=wifi
+autoconnect=true
+
+[wifi]
+ssid=$ssid
+mode=infrastructure
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=$pass
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+NMEOF
+                        chown root:root \"/etc/NetworkManager/system-connections/$ssid.nmconnection\" 2>/dev/null || true
+                        chmod 600 \"/etc/NetworkManager/system-connections/$ssid.nmconnection\" 2>/dev/null || true
+                        sed -i -e '/^interface-name=/d' -e '/^mac-address=/d' \"/etc/NetworkManager/system-connections/$ssid.nmconnection\" 2>/dev/null || true
+                    "
+                fi
+            fi
+        done
+        # Ensure only NetworkManager manages Wi‑Fi on target
+        arch-chroot /mnt /bin/bash -c "systemctl disable iwd 2>/dev/null || true"
+        arch-chroot /mnt /bin/bash -c "systemctl enable NetworkManager 2>/dev/null || true"
+        success "WiFi credentials (iwd -> NetworkManager) transferred to new system"
+        transferred=1
+    fi
+
+    # Fallback: wpa_supplicant (if neither NM nor iwd provided credentials)
+    if [ $transferred -eq 0 ] && [ -f "/etc/wpa_supplicant/wpa_supplicant.conf" ]; then
+        mkdir -p /mnt/etc/wpa_supplicant
+        cp -a /etc/wpa_supplicant/wpa_supplicant.conf /mnt/etc/wpa_supplicant/ 2>/dev/null || true
+        arch-chroot /mnt /bin/bash -c "
+            chown root:root /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
+            chmod 600 /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null || true
+        "
+        # Optionally migrate to NetworkManager: the user can convert later; ensure NM enabled
+        arch-chroot /mnt /bin/bash -c "systemctl enable NetworkManager 2>/dev/null || true"
+        success "WiFi credentials (wpa_supplicant) transferred to new system"
+        transferred=1
+    fi
+
+    # Conditional Wi‑Fi verification: only if credentials were transferred
+    if [ $transferred -eq 1 ]; then
+        arch-chroot /mnt /bin/bash -c '
+            check_ok=1
+            if ls /var/lib/iwd/*.psk >/dev/null 2>&1; then
+                systemctl is-enabled iwd >/dev/null 2>&1 || check_ok=0
+                systemctl is-enabled dhcpcd >/dev/null 2>&1 || check_ok=0
+            fi
+            if ls /etc/NetworkManager/system-connections/*.nmconnection >/dev/null 2>&1; then
+                systemctl is-enabled NetworkManager >/dev/null 2>&1 || check_ok=0
+            fi
+            exit $((1-check_ok))
+        ' || {
+            error "Wi‑Fi configuration/services not properly set on target. Aborting to avoid reboot without network."
+            exit 1
+        }
+    fi
+}
+
+# Select timezone
+select_timezone() {
+    log "Setting up timezone..."
+
+    # Get current timezone as default
+    local current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
+
+    local timezones=(
+        "UTC" "UTC (Universal)"
+        "America/New_York" "US Eastern"
+        "America/Chicago" "US Central"
+        "America/Los_Angeles" "US Pacific"
+        "America/Denver" "US Mountain"
+        "America/Phoenix" "US Arizona"
+        "Europe/London" "UK"
+        "Europe/Paris" "Central Europe"
+        "Europe/Berlin" "Germany"
+        "Asia/Tokyo" "Japan"
+        "Australia/Sydney" "Australia East"
+    )
+
+    SELECTED_TIMEZONE=$(menu_dialog "Timezone Selection" "Current: $current_tz\nSelect timezone:" "${timezones[@]}")
+
+    # Use current timezone if nothing selected
+    if [[ -z "$SELECTED_TIMEZONE" ]]; then
+        SELECTED_TIMEZONE="$current_tz"
+    fi
+
+    # Set timezone (don't fail if we can't set it in live environment)
+    if timedatectl set-timezone "$SELECTED_TIMEZONE" 2>/dev/null; then
+        success "Timezone set to: $SELECTED_TIMEZONE"
+    else
+        warn "Cannot set timezone in live environment - will be set during installation"
+        log "Selected timezone: $SELECTED_TIMEZONE"
+    fi
+}
+
+# Select keyboard layout
+select_keyboard() {
+    log "Setting up keyboard layout..."
+
+    # Common keyboard layouts
+    local keyboards=(
+        "us" "US English"
+        "uk" "UK English"
+        "de" "German"
+        "fr" "French"
+        "es" "Spanish"
+        "it" "Italian"
+        "pt" "Portuguese"
+        "ru" "Russian"
+        "jp" "Japanese"
+        "kr" "Korean"
+        "cn" "Chinese"
+        "dvorak" "Dvorak"
+        "colemak" "Colemak"
+    )
+
+    SELECTED_KEYBOARD=$(menu_dialog "Keyboard Layout" "Select your keyboard layout:" "${keyboards[@]}")
+
+    # Use US layout as fallback if nothing selected (ESC pressed)
+    if [[ -z "$SELECTED_KEYBOARD" ]]; then
+        SELECTED_KEYBOARD="us"
+        warn "No keyboard layout selected, using US English as default"
+    fi
+
+    # Apply keyboard layout immediately
+    loadkeys "$SELECTED_KEYBOARD" 2>/dev/null || true
+
+    success "Keyboard layout selected: $SELECTED_KEYBOARD"
+}
+
+# Main installation flow
+main() {
+    # Clear screen and show welcome
+    clear
+    show_welcome
+
+    # Select boot mode first
+    select_boot_mode
+
+    # Setup network if needed
+    setup_wifi
+
+    # Select timezone
+    select_timezone
+
+    # Select keyboard layout
+    select_keyboard
+
+    # Select installation disk
+    select_disk
+
+    # Get user information
+    setup_user
+
+    # Create archinstall configuration
+    create_archinstall_config
+
+    # Final confirmation
+    if ! show_dialog --yesno "Ready to Install
+
+Configuration Summary:
+• Disk: $SELECTED_DISK (will be encrypted with LUKS)
+• Hostname: $HOSTNAME
+• Username: $USERNAME (with sudo access)
+• Root account: enabled with password
+• Encryption: LUKS with your chosen password
+• Timezone: $SELECTED_TIMEZONE
+• Keyboard: $SELECTED_KEYBOARD
+• Filesystem: BTRFS with compression
+• Bootloader: systemd-boot
+• Audio: PipeWire
+• Desktop: ArchRiot (Hyprland)
+
+Proceed with installation?" 18 60; then
+        log "Installation cancelled by user"
+        exit 0
+    fi
+
+    # Run the installation
+    run_archinstall
+
+    # Install ArchRiot
+    install_archriot
+
+    # Installation complete
+    show_dialog --msgbox "Installation Complete!
+
+ArchRiot has been successfully installed on your system.
+
+The system will now reboot. After reboot:
+- Enter your disk encryption password
+- Log in with your user account
+- Enjoy your new ArchRiot system!
+
+Note: The first boot may take a few extra moments to initialize services." 14 70
+
+    success "ArchRiot installation completed successfully!"
+
+    # Show post-install ArchRiot setup instructions
+    show_dialog --msgbox "Installation Complete!
+
+Base Arch Linux system has been installed successfully!
+
+IMPORTANT - Complete Your ArchRiot Setup:
+
+After the system reboots and you log in, run this command to finish setting up ArchRiot:
+
+curl -fsSL https://ArchRiot.org/setup.sh | bash
+
+This will install:
+- Hyprland desktop environment
+- All ArchRiot configurations
+- Essential applications and themes
+
+Press OK to reboot and complete your ArchRiot installation!" 18 75
+
+    log "System will reboot in 10 seconds..."
+
+    # Clean up sensitive files securely
+    shred -vfz -n 3 "$ARCHINSTALL_CONFIG" 2>/dev/null || rm -f "$ARCHINSTALL_CONFIG"
+    shred -vfz -n 3 "$ARCHINSTALL_CREDS" 2>/dev/null || rm -f "$ARCHINSTALL_CREDS"
+    rm -f /tmp/input_result /tmp/password_result /tmp/menu_result
+
+    # Reboot
+    sleep 10
+    reboot
+}
+
+# Handle Ctrl+C gracefully
+trap 'echo -e "\n${YELLOW}Installation interrupted by user${NC}"; exit 1' INT
+
+# Run main function
+main "$@"
